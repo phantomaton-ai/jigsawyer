@@ -656,5 +656,5 @@ class JigsawPuzzle extends HTMLElement {
     }
 }
 
-customElements.define('jigsaw-puzzle', JigsawPuzzle);
+window.customElements.define('jigsaw-puzzle', JigsawPuzzle);
 console.log('🧙‍♂️ Custom element "jigsaw-puzzle" defined! Ready for some puzzling chaos! 💥');

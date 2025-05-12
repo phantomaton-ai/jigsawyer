@@ -19,6 +19,8 @@
   "description": "",
   "type": "module",
   "devDependencies": {
+    "jsdom": "^26.1.0",
+    "jsdom-global": "^3.0.2",
     "lovecraft": "^1.0.3"
   }
 }

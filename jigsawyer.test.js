@@ -1,4 +1,5 @@
 import { expect } from 'lovecraft'; // Assuming lovecraft is set up
+import 'jsdom-global/register.js';
 import './jigsawyer.js'; // Import the component to register it
 
 describe('JigsawPuzzle Component 🧩👻', () => {
