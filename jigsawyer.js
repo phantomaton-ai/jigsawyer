@@ -137,8 +137,6 @@ class JigsawPuzzle extends HTMLElement {
         const hostRect = this.getBoundingClientRect();
         this._canvas.width = this.puzzleWidth; // Use assumed full puzzle dimension for canvas drawing space
         this._canvas.height = this.puzzleHeight;
-        this.shadowRoot.querySelector(':host').style.width = `${this.puzzleWidth}px`;
-        this.shadowRoot.querySelector(':host').style.height = `${this.puzzleHeight}px`;
 
 
         this.pieceCount = parseInt(this.getAttribute('size'), 10) || 1000;
