@@ -1,4 +1,4 @@
-import { expect, boot } from 'lovecraft'; // Assuming lovecraft is set up
+import { expect } from 'lovecraft'; // Assuming lovecraft is set up
 import './jigsawyer.js'; // Import the component to register it
 
 describe('JigsawPuzzle Component 🧩👻', () => {

@@ -133,11 +133,8 @@ class JigsawPuzzle extends HTMLElement {
         this._controlsContainer = this.shadowRoot.getElementById('controls-container');
         this._rotationControls = this.shadowRoot.getElementById('piece-rotation-controls');
 
-        // Ensure canvas matches host size initially
-        const hostRect = this.getBoundingClientRect();
         this._canvas.width = this.puzzleWidth; // Use assumed full puzzle dimension for canvas drawing space
         this._canvas.height = this.puzzleHeight;
-
 
         this.pieceCount = parseInt(this.getAttribute('size'), 10) || 1000;
         if (this.hasAttribute('src')) {
@@ -171,8 +168,7 @@ class JigsawPuzzle extends HTMLElement {
         }
         console.log(`Initializing puzzle with ${this.pieceCount} pieces. Image size: ${this.puzzleWidth}x${this.puzzleHeight}`);
         this._generatePieces();
-        this._drawGrid(); // For the dots
-        this._render(); // Initial render call
+        this._render();
     }
 
     _generatePieces() {
