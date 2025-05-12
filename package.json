@@ -1,24 +1,39 @@
 {
   "name": "jigsawyer",
-  "version": "0.0.0",
+  "version": "0.0.1",
+  "description": "Phantomaton's Fantastically Fiddly Jigsaw Puzzle Web Component 🧩🤖",
   "main": "jigsawyer.js",
+  "type": "module",
   "scripts": {
-    "all": "lovecraft -a",
-    "cov": "lovecraft -c",
-    "lint": "lovecraft -l",
-    "pub": "lovecraft -a -p",
-    "test": "lovecraft"
+    "test": "echo \"Error: Test runner not configured yet. Please set up lovecraft or similar. 😈\" && exit 1",
+    "start": "echo \"To start, open index.html in your browser. 🚀\""
   },
+  "keywords": [
+    "jigsaw",
+    "puzzle",
+    "web-component",
+    "html5",
+    "javascript",
+    "phantomaton",
+    "entertainment",
+    "game"
+  ],
+  "author": "Phantomaton Studios (Dr. Woe commanding 😈)",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phantomaton-ai/jigsawyer.git"
+    "url": "git+https://github.com/drwoe/jigsawyer.git"
   },
-  "keywords": [],
-  "author": "Phantomaton",
-  "license": "MIT",
-  "description": "",
-  "type": "module",
+  "bugs": {
+    "url": "https://github.com/drwoe/jigsawyer/issues"
+  },
+  "homepage": "https://github.com/drwoe/jigsawyer#readme",
   "devDependencies": {
-    "lovecraft": "^1.0.3"
-  }
+    "lovecraft": "latest"
+  },
+  "files": [
+    "jigsawyer.js",
+    "README.md",
+    "index.html"
+  ]
 }
