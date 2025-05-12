@@ -199,17 +199,17 @@ class JigsawPuzzle extends HTMLElement {
                 piece.classList.add('puzzle-piece');
                 piece.style.width = `${pieceWidth}px`;
                 piece.style.height = `${pieceHeight}px`;
-                piece.style.backgroundImage = \`url(\${this._img.src})\`;
+                piece.style.backgroundImage = `url(${this._img.src})`;
                 // Background position needs to be scaled by zoom level of image itself if any, but for now direct mapping
-                piece.style.backgroundPosition = \`-\${c * pieceWidth}px -\${r * pieceHeight}px\`;
-                piece.style.backgroundSize = \`\${this.puzzleWidth}px \${this.puzzleHeight}px\`; // Show the whole image, clipped by div
+                piece.style.backgroundPosition = `-${c * pieceWidth}px -${r * pieceHeight}px`;
+                piece.style.backgroundSize = `${this.puzzleWidth}px ${this.puzzleHeight}px`; // Show the whole image, clipped by div
 
                 // Random initial position and rotation
                 const randomX = Math.random() * (this.puzzleWidth - pieceWidth);
                 const randomY = Math.random() * (this.puzzleHeight - pieceHeight);
                 const randomAngle = Math.floor(Math.random() * 4) * 90; // 0, 90, 180, 270
 
-                piece.style.transform = \`translate(\${randomX}px, \${randomY}px) rotate(\${randomAngle}deg)\`;
+                piece.style.transform = `translate(${randomX}px, ${randomY}px) rotate(${randomAngle}deg)`;
                 piece.dataset.id = this._pieces.length;
                 piece.dataset.correctX = c * pieceWidth; // Store correct position for snapping later
                 piece.dataset.correctY = r * pieceHeight;
@@ -234,7 +234,7 @@ class JigsawPuzzle extends HTMLElement {
             }
             if (this._pieces.length >= this.pieceCount) break;
         }
-        console.log(\`Generated \${this._pieces.length} piece elements. 🧩✨\`);
+        console.log(`Generated ${this._pieces.length} piece elements.`);
     }
 
     _drawGrid() {
@@ -574,7 +574,7 @@ class JigsawPuzzle extends HTMLElement {
         // Transform is applied relative to the puzzle area, which is panned/zoomed
         // So piece x,y are in "world" coordinates.
         // The CSS transform should be set directly.
-        pieceData.element.style.transform = \`translate(\${pieceData.x}px, \${pieceData.y}px) rotate(\${pieceData.rotation}deg)\`;
+        pieceData.element.style.transform = `translate(${pieceData.x}px, ${pieceData.y}px) rotate(${pieceData.rotation}deg)`;
     }
 
     _snapPieceToGrid(pieceData) {
@@ -594,7 +594,7 @@ class JigsawPuzzle extends HTMLElement {
         const dist = Math.hypot(pieceCenterX - correctCenterX, pieceCenterY - correctCenterY);
 
         if (dist < snapThreshold) {
-            console.log(\`Piece \${pieceData.id} snapped! ✅ Distance: \${dist.toFixed(2)}\`);
+            console.log(`Piece ${pieceData.id} snapped! ✅ Distance\${dist.toFixed(2)`);
             pieceData.x = pieceData.correctX;
             pieceData.y = pieceData.correctY;
             pieceData.isSnapped = true;
@@ -610,7 +610,7 @@ class JigsawPuzzle extends HTMLElement {
             }
         } else {
             pieceData.isSnapped = false;
-            // console.log(\`Piece \${pieceData.id} not snapped. Dist: \${dist.toFixed(2)}, Threshold: \${snapThreshold}\`);
+            // console.log(`Piece ${pieceData.id} not snapped. Dist: ${dist.toFixed(2)}, Threshold: ${snapThreshold}`);
         }
     }
     
@@ -648,12 +648,12 @@ class JigsawPuzzle extends HTMLElement {
         // Apply pan and zoom to the puzzle area container (which holds the pieces)
         // Pieces themselves have x,y in world coordinates, and their transforms place them there.
         // The puzzleArea's transform pans/zooms the "camera" over this world.
-        this._puzzleArea.style.transform = \`scale(\${this._zoomLevel}) translate(-\${this._viewBoxX}px, -\${this._viewBoxY}px)\`;
+        this._puzzleArea.style.transform = `scale(${this._zoomLevel}) translate(-${this._viewBoxX}px, -${this._viewBoxY}px)`;
         // The transform-origin should be top-left (0,0) for this to work as expected with viewBox
         this._puzzleArea.style.transformOrigin = '0 0';
 
         this._drawGrid(); // Redraw grid dots which are on a separate canvas and need to respect pan/zoom
-        console.log(\`Rendered with zoom: \${this._zoomLevel.toFixed(2)}, pan: (\${this._viewBoxX.toFixed(0)}, \${this._viewBoxY.toFixed(0)})\`);
+        console.log(`Rendered with zoom: ${this._zoomLevel.toFixed(2)}, pan: (${this._viewBoxX.toFixed(0)}, ${this._viewBoxY.toFixed(0)})`);
     }
 
     disconnectedCallback() {
