@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jigsawyer Puzzle Fun! 🤩🧩</title>
+    <style>
+        body {
+            font-family: 'Comic Sans MS', 'Chalkboard SE', 'Bradley Hand', cursive; /* Perfectly idiotic! */
+            display: flex;
+            flex-direction: column; /* For controls later perhaps! */
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #333; /* Spooky dark! 👻 */
+            color: #fff;
+            overflow: hidden; /* No pesky scrollbars unless we want them! */
+        }
+        h1 {
+            color: #ff9800; /* Jack-o-lantern orange! 🎃 */
+            text-shadow: 2px 2px #000;
+        }
+        jigsaw-puzzle {
+            border: 3px dashed #ff9800; /* Thematic! */
+            box-shadow: 0 0 20px rgba(255, 152, 0, 0.7); /* Glowing! ✨ */
+            /* We'll let the component define its own size based on the image */
+        }
+        .controls {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: rgba(0,0,0,0.5);
+            border-radius: 8px;
+            display: flex;
+            gap: 10px;
+        }
+        .controls button {
+            background-color: #ff9800;
+            color: #000;
+            border: 2px solid #000;
+            padding: 8px 15px;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: transform 0.1s ease-out;
+        }
+        .controls button:hover {
+            background-color: #e68900;
+            transform: scale(1.05);
+        }
+        .controls button:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+    <h1>Phantomaton's Jigsawyer! 👻🧩🤖</h1>
+    <jigsaw-puzzle src="example.png" size="1000"></jigsaw-puzzle>
+    <!-- Controls will be managed by the component or added here later if needed -->
+    <script type="module" src="jigsawyer.js"></script>
+</body>
+</html>
