@@ -20,12 +20,20 @@
         h1 {
             color: #ff9800; /* Jack-o-lantern orange! 🎃 */
             text-shadow: 2px 2px #000;
+            margin-bottom: 10px; /* Space between title and puzzle */
         }
         jigsaw-puzzle {
+            display: block; /* Web components are inline by default */
+            width: 90vw; /* Make it responsive, take 90% of viewport width */
+            height: 70vh; /* Take 70% of viewport height */
+            max-width: 1344px; /* Don't exceed assumed image width */
+            max-height: 960px; /* Don't exceed assumed image height */
             border: 3px dashed #ff9800; /* Thematic! */
             box-shadow: 0 0 20px rgba(255, 152, 0, 0.7); /* Glowing! ✨ */
-            /* We'll let the component define its own size based on the image */
+            box-sizing: border-box; /* Include border in element's total size */
         }
+         /* Styles for controls managed by jigsaw-controls component now */
+         /*
         .controls {
             margin-top: 20px;
             padding: 10px;
@@ -52,12 +60,14 @@
         .controls button:active {
             transform: scale(0.95);
         }
+        */
     </style>
 </head>
 <body>
     <h1>Phantomaton's Jigsawyer! 👻🧩🤖</h1>
-    <jigsaw-puzzle src="example.png" size="1000"></jigsaw-puzzle>
-    <!-- Controls will be managed by the component or added here later if needed -->
+    <!-- size="40" as requested for focused debugging -->
+    <jigsaw-puzzle src="example.png" size="40"></jigsaw-puzzle>
+    <!-- Controls component is now inside jigsaw-puzzle shadow DOM -->
     <script type="module" src="jigsawyer.js"></script>
 </body>
 </html>
