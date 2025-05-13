@@ -1,15 +1,18 @@
 // piece.js - Domain model for a single puzzle piece.
 
 import { Position } from './position.js';
-import { PieceJoints } from './joints.js'; // Assuming PieceJoints is the name from joints.js
+import { PieceJoints } from './joints.js';
+// Import the path generation utility
+import { generatePiecePath } from './path.js';
 
 /**
  * Represents a single puzzle piece's data model.
+ * Holds intrinsic properties (origination, size, shape) and current state (placement, rotation, snapped).
  */
 export class Piece {
     /**
      * @param {number} id - Unique identifier for the piece (e.g., its index in the puzzle grid).
-     * @param {Position} origination - The top-left position of the piece in the fully assembled puzzle (board coordinates).
+     * @param {Position} origination - The top-left position of the piece in the fully assembled puzzle grid (board coordinates).
      * @param {number} width - The width of the piece (board units).
      * @param {number} height - The height of the piece (board units).
      * @param {Position} initialPlacement - The initial top-left position of the piece on the board (board coordinates).
@@ -17,20 +20,34 @@ export class Piece {
      * @param {PieceJoints} [joints=new PieceJoints()] - The joints connected to this piece's edges.
      */
     constructor(id, origination, width, height, initialPlacement, initialRotation = 0, joints = new PieceJoints()) {
-        if (!(origination instanceof Position)) throw new Error("Piece origination must be a Position.");
-        if (!(initialPlacement instanceof Position)) throw new Error("Piece initialPlacement must be a Position.");
-        if (!(joints instanceof PieceJoints)) throw new Error("Piece joints must be a PieceJoints instance.");
+        if (!(origination instanceof Position)) {
+            console.error("Piece origination must be a Position.");
+            origination = new Position(0, 0); // Provide a default to avoid errors
+        }
+        if (!(initialPlacement instanceof Position)) {
+            console.error("Piece initialPlacement must be a Position.");
+            initialPlacement = new Position(0, 0); // Provide a default
+        }
+        if (!(joints instanceof PieceJoints)) {
+            console.warn("Piece joints must be a PieceJoints instance. Using default.");
+            joints = new PieceJoints(); // Provide a default
+        }
 
         this.id = id;
         this.origination = origination; // Correct top-left position in the assembled puzzle (board units)
         this.width = width;           // Width of the piece (board units)
         this.height = height;         // Height of the piece (board units)
+        this.joints = joints;         // Reference to the PieceJoints instance for this piece
+
         this._placement = initialPlacement; // Current top-left position on the board (board units)
         this._rotation = initialRotation % 4; // Current rotation in quarter turns (0, 1, 2, or 3)
-        this.joints = joints;         // Reference to the PieceJoints instance for this piece
 
         this.isSnapped = false;       // Is the piece currently snapped to its correct location?
         // Note: isSelected and element reference are handled by the view component (jigsaw-piece)
+
+        // Generate the SVG path data for this piece's shape based on its dimensions and joints
+        // This path is defined in the piece's local coordinate system (0,0 at top-left)
+        this.svgPathData = generatePiecePath(this.width, this.height, this);
     }
 
     /**
@@ -52,8 +69,7 @@ export class Piece {
             return;
         }
         this._placement = position;
-        // Snapped status should be checked externally after placement update
-        // this.isSnapped = this.canSnap(); // Or handle in Puzzle/Board logic
+        // Snapped status is typically checked externally after placement update (e.g., in controller's moveend handler)
     }
 
     /**
@@ -72,8 +88,7 @@ export class Piece {
     rotate(turns) {
         const newRotation = this._rotation + turns;
         this._rotation = (newRotation % 4 + 4) % 4; // Normalize to 0, 1, 2, or 3
-        // Snapped status should be checked externally after rotation update
-        // this.isSnapped = this.canSnap(); // Or handle in Puzzle/Board logic
+        // Snapped status is typically checked externally after rotation update
     }
 
     /**
@@ -82,8 +97,7 @@ export class Piece {
      * @returns {boolean} True if origination matches placement and rotation is 0.
      */
     test() {
-        // We assume exact position match for the 'test' function here,
-        // although snapping might use a threshold.
+        // We assume exact position match for the 'test' function here.
         return this.origination.equals(this._placement) && this._rotation === 0;
     }
 
@@ -92,7 +106,7 @@ export class Piece {
      * @returns {Position}
      */
     get center() {
-        return this._placement.add(new Position(this.width / 2, this.height / 2));
+        return this.placement.add(new Position(this.width / 2, this.height / 2));
     }
 
     /**
@@ -138,119 +152,19 @@ export class Piece {
 
     /**
      * Gets the SVG transform attribute value for placing and rotating the piece element.
-     * The transform is applied relative to the piece's top-left corner (0,0 in its local system).
-     * @returns {string} The SVG transform string.
+     * This transform is applied to the <jigsaw-piece> host element via CSS.
+     * @returns {{x: number, y: number, rotation: number}} Position (top-left) and rotation (quarter turns).
      */
-    getSvgTransform() {
-         // SVG transform `translate(x,y)` moves the group's origin to the piece's top-left (placement).
-         // SVG transform `rotate(angle center_x center_y)` rotates around `(center_x, center_y)`
-         // relative to the group's current origin. To rotate around the piece's visual center,
-         // center_x is width/2 and center_y is height/2.
-         const rotationDegrees = this._rotation * 90; // Convert quarter turns to degrees
-
-        return `translate(${this.placement.x}, ${this.placement.y}) rotate(${rotationDegrees} ${this.width / 2} ${this.height / 2})`;
+    getVisualState() {
+         return {
+             x: this.placement.x,
+             y: this.placement.y,
+             rotation: this.rotation, // Quarter turns
+             isSelected: this.isSelected, // Assuming this is updated externally on the data model
+             isSnapped: this.isSnapped // Assuming this is updated externally on the data model
+         };
     }
 
-     /**
-     * Returns a string representation.
-     * @returns {string}
-     */
-    toString() {
-        return `Piece(ID: ${this.id}, Orig: ${this.origination.toString()}, Place: ${this.placement.toString()}, Rot: ${this.rotation}q, Snapped: ${this.isSnapped})`;
-    }
+    // toString method removed as per Dr. Woe's request for simplicity.
 
-    // TODO: Method to generate the complex SVG path based on joints and cuts
-    generateComplexSvgPath() {
-        // This is where the magic happens using this.joints and the Cut objects.
-        // It will iterate through the 4 edges (top, right, bottom, left),
-        // retrieve the corresponding joint from this.joints,
-        // and generate an SVG path segment for that edge.
-        // The path is defined in the piece's local coordinate system (0,0 at top-left).
-
-        // The path string starts with 'M 0 0' (Move to top-left).
-        let path = 'M 0 0';
-
-        // 1. Top Edge (from 0,0 to width,0)
-        // Need to get the joint for the 'top' edge.
-        // If joint exists, generate path from (0,0) to (width,0) with the joint shape.
-        // If no joint (outer edge), draw a straight line L width 0.
-        const topJoint = this.joints.top;
-        if (topJoint) {
-             // TODO: Generate path segment for complex top edge
-             console.warn(`Generating complex path for Piece ${this.id}: Top edge is complex (Joint with piece ${topJoint.pieceIdB}). Not yet implemented.`);
-             // For now, add a placeholder straight line + debug circle
-             path += ` L ${this.width / 2} 0`; // Move to middle top edge
-             path += ` c 0 -${this.height * topJoint.size * (topJoint.outward ? 1 : -1)} 0 -${this.height * topJoint.size * (topJoint.outward ? 1 : -1)} ${this.width / 2} 0`; // Simple bezier for visualization
-             path += ` L ${this.width} 0`; // Move to top-right
-        } else {
-            path += ` L ${this.width} 0`; // Straight line for flat top edge
-        }
-
-
-        // 2. Right Edge (from width,0 to width,height)
-        const rightJoint = this.joints.right;
-         if (rightJoint) {
-             // TODO: Generate path segment for complex right edge
-             console.warn(`Generating complex path for Piece ${this.id}: Right edge is complex (Joint with piece ${rightJoint.pieceIdB}). Not yet implemented.`);
-             // For now, add a placeholder straight line + debug circle
-             path += ` L ${this.width} ${this.height / 2}`; // Move to middle right edge
-             path += ` c ${this.width * rightJoint.size * (rightJoint.outward ? 1 : -1)} 0 ${this.width * rightJoint.size * (rightJoint.outward ? 1 : -1)} 0 0 ${this.height / 2}`; // Simple bezier
-             path += ` L ${this.width} ${this.height}`; // Move to bottom-right
-         } else {
-            path += ` L ${this.width} ${this.height}`; // Straight line for flat right edge
-         }
-
-        // 3. Bottom Edge (from width,height to 0,height)
-        const bottomJoint = this.joints.bottom;
-         if (bottomJoint) {
-             // TODO: Generate path segment for complex bottom edge
-             console.warn(`Generating complex path for Piece ${this.id}: Bottom edge is complex (Joint with piece ${bottomJoint.pieceIdB}). Not yet implemented.`);
-              // Note: Directions for bottom and left edges are reversed relative to standard path drawing.
-              // If moving from right-to-left along the bottom edge, an 'outie' from piece A (this)
-              // means the path dips *down*, not up.
-              // For now, add a placeholder
-              path += ` L ${this.width / 2} ${this.height}`; // Move to middle bottom edge
-              path += ` c 0 ${this.height * bottomJoint.size * (bottomJoint.outward ? 1 : -1)} 0 ${this.height * bottomJoint.size * (bottomJoint.outward ? 1 : -1)} -${this.width / 2} 0`; // Simple bezier
-              path += ` L 0 ${this.height}`; // Move to bottom-left
-
-         } else {
-            path += ` L 0 ${this.height}`; // Straight line for flat bottom edge
-         }
-
-        // 4. Left Edge (from 0,height to 0,0)
-        const leftJoint = this.joints.left;
-         if (leftJoint) {
-             // TODO: Generate path segment for complex left edge
-             console.warn(`Generating complex path for Piece ${this.id}: Left edge is complex (Joint with piece ${leftJoint.pieceIdB}). Not yet implemented.`);
-              // Note: Directions for left edge are reversed relative to standard path drawing (bottom-to-top).
-              // If moving from bottom-to-top along the left edge, an 'outie' from piece A (this)
-              // means the path bulges *left*, not right.
-              // For now, add a placeholder
-              path += ` L 0 ${this.height / 2}`; // Move to middle left edge
-              path += ` c -${this.width * leftJoint.size * (leftJoint.outward ? 1 : -1)} 0 -${this.width * leftJoint.size * (leftJoint.outward ? 1 : -1)} 0 0 -${this.height / 2}`; // Simple bezier
-              // Ends implicitly at 0,0
-         } else {
-            // Ends implicitly at 0,0
-         }
-
-        path += ' Z'; // Close the path
-
-        // This method will need the Joint and Cut classes to calculate intermediate points.
-        // For now, it returns a simple rectangle path or a very crude placeholder.
-        // Let's return the simple rect path until edge generation is properly implemented.
-        // But leave the comments as the plan.
-
-        // Returning a rectangle path for now.
-        return `M 0 0 L ${this.width} 0 L ${this.width} ${this.height} L 0 ${this.height} Z`;
-    }
-
-    /**
-     * Returns the SVG clipPath element content (without <clipPath> tag) for the piece's shape.
-     * This is used to mask the image pattern.
-     * @returns {string} The SVG path data string ('d' attribute value) for the piece's border.
-     */
-    getClipPathData() {
-        // This will eventually call generateComplexSvgPath()
-        return this.generateComplexSvgPath(); // Currently returns rectangle path
-    }
 }
