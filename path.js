@@ -1,208 +1,206 @@
-// path.js - Utility for generating SVG paths for puzzle pieces
+// path.js - Utility for generating SVG paths for puzzle pieces with curvy edges
 
 /**
- * Generates an SVG path string for a puzzle piece edge
- * @param {number} length - The length of the edge
- * @param {boolean} hasNib - Whether this edge has a tab/nib
- * @param {boolean} isOutward - Whether the nib protrudes outward (true) or inward (false)
- * @param {number} nibSize - Size of the nib as a ratio of edge length (typically 0.15-0.33)
- * @param {Object} cut - The Cut object defining the edge's waviness
- * @param {function} sampleFn - Optional function to sample the cut at position t
- * @returns {string} SVG path string for this edge
+ * Generates a curved edge path for a puzzle piece
+ * @param {number} length - Length of the edge (width or height)
+ * @param {boolean} isVertical - Whether this is a vertical edge (true) or horizontal (false)
+ * @param {boolean} isReversed - Whether to traverse the edge in reverse direction
+ * @param {Object} cut - The Cut object with a sample() method
+ * @param {number} pieceX - X position of the piece in the board
+ * @param {number} pieceY - Y position of the piece in the board
+ * @returns {string} SVG path segment (without the initial M command)
  */
-export function generateEdgePath(length, hasNib, isOutward, nibSize, cut, sampleFn) {
-    // Default sample function if none provided
-    const sample = sampleFn || (cut && ((t) => cut.sample(t))) || ((t) => 0);
+export function generateEdgePath(length, isVertical, isReversed, cut, pieceX, pieceY) {
+    // Default values
+    length = length || 100;
+    const numPoints = 10; // Number of points to sample along the edge
     
-    // Number of points to generate for the path
-    const numPoints = 20;
+    // Function to sample the cut at position t (0 to 1 along the edge)
+    // If no cut is provided, return a flat edge
+    const sampleCut = (t) => {
+        if (!cut) return 0;
+        
+        try {
+            // Get displacement from the cut
+            // Need to adjust t based on piece position for continuous cuts
+            let adjustedT = t;
+            if (isVertical) {
+                // For vertical edges, t is relative to the piece's top-left
+                // We need to adjust by the piece's Y position in the board
+                adjustedT = (pieceY + t * length) / (pieceY + length);
+            } else {
+                // For horizontal edges, adjust by X position
+                adjustedT = (pieceX + t * length) / (pieceX + length);
+            }
+            
+            return cut.sample(adjustedT) || 0;
+        } catch (e) {
+            console.error("Error sampling cut:", e);
+            return 0;
+        }
+    };
     
-    // Points array starts empty - we'll build it as we go
+    // Points array - will hold [x, y] coordinates
     const points = [];
-    
-    // Calculate center point of the edge where the nib will be
-    const midPoint = length / 2;
-    
-    // Nib height - positive value means outward, negative means inward
-    const nibHeight = length * (nibSize || 0.25) * (isOutward ? 1 : -1);
     
     // Generate points along the edge
     for (let i = 0; i <= numPoints; i++) {
-        const t = i / numPoints; // Position along edge (0 to 1)
-        const x = t * length; // X position along edge
+        let t = i / numPoints; // Position along edge (0 to 1)
         
-        // Base Y position is 0, modified by:
-        // 1. The sample function from the Cut (if provided)
-        // 2. The nib shape (a semi-circle around the midpoint)
-        let y = 0;
-        
-        // Add sample function displacement
-        if (sample) {
-            y += sample(t) || 0; // In case sample returns undefined
+        // Reverse direction if needed
+        if (isReversed) {
+            t = 1 - t;
         }
         
-        // Add nib shape if this edge has one
-        if (hasNib) {
-            // Distance from the midpoint (0 to 0.5, as proportion of length)
-            const distFromMid = Math.abs(x - midPoint) / length;
-            
-            // Nib function: semi-circular shape centered at midpoint
-            // Only apply within the center 40% of the edge
-            if (distFromMid < 0.2) {
-                // Semi-circle: sqrt(r² - (x-midPoint)²)
-                // Where r = 0.2 * length (radius of semi-circle)
-                const nibRadius = 0.2 * length;
-                const nibEffect = Math.sqrt(Math.max(0, nibRadius*nibRadius - Math.pow(x - midPoint, 2)));
-                
-                // Apply the nib displacement - direction based on isOutward
-                y += nibHeight * (nibEffect / nibRadius);
-            }
+        // Sample the cut to get displacement
+        const displacement = sampleCut(t);
+        
+        // Calculate actual x,y coordinates based on edge orientation
+        let x, y;
+        if (isVertical) {
+            // For vertical edges:
+            // X is displacement, Y is position along edge
+            x = displacement;
+            y = t * length;
+        } else {
+            // For horizontal edges:
+            // X is position along edge, Y is displacement
+            x = t * length;
+            y = displacement;
         }
         
         points.push([x, y]);
     }
     
-    // Convert points to SVG path string
-    // Using relative commands for better compressibility
-    let path = `M ${points[0][0]},${points[0][1]}`;
+    // Convert points to SVG path commands
+    // (skip the initial M command - caller will provide it)
+    if (points.length === 0) {
+        return isVertical ? `V ${length}` : `H ${length}`;
+    }
     
-    // Add cubic spline segments
-    for (let i = 1; i < points.length; i += 3) {
-        // For each group of 3 points, create a smooth curve
-        // If we don't have enough points left, just use line segments
-        if (i + 2 < points.length) {
-            const p0 = points[i - 1];
-            const p1 = points[i];
-            const p2 = points[i + 1];
-            const p3 = points[i + 2];
-            
-            // Calculate control points for smooth curve
-            // Simple method: use points directly as control points
-            path += ` C ${p1[0]},${p1[1]} ${p2[0]},${p2[1]} ${p3[0]},${p3[1]}`;
-        } else {
-            // Not enough points for cubic, use line
-            path += ` L ${points[i][0]},${points[i][1]}`;
-        }
+    // Use lineTo for first point (from the starting position)
+    let path = `L ${points[0][0]},${points[0][1]}`;
+    
+    // Use quadratic curves for smoother transitions between points
+    for (let i = 1; i < points.length; i++) {
+        path += ` L ${points[i][0]},${points[i][1]}`;
     }
     
     return path;
 }
 
 /**
- * Generates a complete SVG path for a puzzle piece with the given properties
- * @param {number} width - Piece width
- * @param {number} height - Piece height
- * @param {Object} joints - Object with top, right, bottom, left joints
- * @returns {string} SVG path string for the complete piece
+ * Generates a complete SVG path for a puzzle piece with curved edges
+ * @param {number} width - Width of the piece
+ * @param {number} height - Height of the piece
+ * @param {Object} piece - Piece data with position and joints information
+ * @returns {string} Complete SVG path string for the piece shape
  */
-export function generatePiecePath(width, height, joints) {
-    if (!width || !height) {
-        return `M 0 0 H ${width || 100} V ${height || 100} H 0 Z`;
-    }
+export function generatePiecePath(width, height, piece) {
+    // Default dimensions
+    width = width || 100;
+    height = height || 100;
+    
+    // Extract piece position and joints
+    const pieceX = piece?.origination?.x || 0;
+    const pieceY = piece?.origination?.y || 0;
+    const joints = piece?.joints;
     
     // Start path at top-left corner
-    let path = 'M 0 0 ';
+    let path = `M 0,0`;
     
-    // Add top edge (left to right)
-    if (joints && joints.top) {
-        const isOutward = joints.top.outward;
-        const nibSize = joints.top.size || 0.25;
-        path += generateEdgePath(width, true, isOutward, nibSize, joints.top.cut, 
-            t => joints.top.cut ? joints.top.cut.sample(t) : 0);
+    // Top edge (left to right)
+    if (joints?.top?.cut) {
+        path += ' ' + generateEdgePath(
+            width,               // length
+            false,               // isVertical (horizontal)
+            false,               // isReversed 
+            joints.top.cut,      // cut object
+            pieceX,              // piece X position
+            pieceY               // piece Y position
+        );
     } else {
-        path += `H ${width}`;
+        path += ` H ${width}`;   // Straight line if no cut
     }
     
-    // Add right edge (top to bottom)
-    if (joints && joints.right) {
-        // For vertical edges we need to rotate our coordinate system
-        // We're moving from (width,0) to (width,height)
-        const pathSegment = generateEdgePath(height, true, joints.right.outward, 
-            joints.right.size || 0.25, joints.right.cut,
-            t => joints.right.cut ? joints.right.cut.sample(t) : 0);
-            
-        // Transform the path segment to go downward
-        path += ` ${transformPath(pathSegment, { rotate: 90, translateX: width, translateY: 0 })}`;
+    // Right edge (top to bottom)
+    if (joints?.right?.cut) {
+        // Need to convert the right edge path:
+        // 1. Start point is now (width, 0)
+        // 2. Horizontal displacements now go right from the edge
+        const rightPath = generateEdgePath(
+            height,               // length
+            true,                 // isVertical
+            false,                // isReversed
+            joints.right.cut,     // cut object
+            pieceX + width,       // right edge X position
+            pieceY                // piece Y position
+        );
+        
+        // The rightPath starts at current point (width, 0) already
+        // We need to transform x coordinates: x -> width + x
+        const transformedPath = rightPath.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g, 
+                               (match, x, y) => `L ${Number(width) + Number(x)},${y}`);
+        
+        path += ' ' + transformedPath;
     } else {
-        path += ` V ${height}`;
+        path += ` V ${height}`;   // Straight line if no cut
     }
     
-    // Add bottom edge (right to left)
-    if (joints && joints.bottom) {
-        // Bottom edge goes from right to left, so we need to flip direction
-        const pathSegment = generateEdgePath(width, true, joints.bottom.outward, 
-            joints.bottom.size || 0.25, joints.bottom.cut,
-            t => joints.bottom.cut ? joints.bottom.cut.sample(t) : 0);
-            
-        // Transform the path segment to go left from bottom-right
-        path += ` ${transformPath(pathSegment, { rotate: 180, translateX: width, translateY: height })}`;
+    // Bottom edge (right to left)
+    if (joints?.bottom?.cut) {
+        // Need to convert the bottom edge path:
+        // 1. Start point is now (width, height)
+        // 2. Move right to left (reverse)
+        // 3. Y displacements go down from the bottom edge
+        const bottomPath = generateEdgePath(
+            width,                // length
+            false,                // isVertical (horizontal)
+            true,                 // isReversed (right to left)
+            joints.bottom.cut,    // cut object
+            pieceX,               // piece X position 
+            pieceY + height       // bottom edge Y position
+        );
+        
+        // Transform: 
+        // 1. x -> width - x (for reverse direction)
+        // 2. y -> height + y (for downward displacement)
+        const transformedPath = bottomPath.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g, 
+                              (match, x, y) => `L ${width - Number(x)},${Number(height) + Number(y)}`);
+        
+        path += ' ' + transformedPath;
     } else {
-        path += ` H 0`;
+        path += ` H 0`;           // Straight line if no cut
     }
     
-    // Add left edge (bottom to top)
-    if (joints && joints.left) {
-        // Left edge goes from bottom to top
-        const pathSegment = generateEdgePath(height, true, joints.left.outward, 
-            joints.left.size || 0.25, joints.left.cut,
-            t => joints.left.cut ? joints.left.cut.sample(t) : 0);
-            
-        // Transform the path segment to go upward from bottom-left
-        path += ` ${transformPath(pathSegment, { rotate: 270, translateX: 0, translateY: height })}`;
+    // Left edge (bottom to top)
+    if (joints?.left?.cut) {
+        // Need to convert the left edge path:
+        // 1. Start point is now (0, height)
+        // 2. Move bottom to top (reverse)
+        // 3. X displacements go left from the edge
+        const leftPath = generateEdgePath(
+            height,               // length
+            true,                 // isVertical
+            true,                 // isReversed (bottom to top)
+            joints.left.cut,      // cut object
+            pieceX,               // left edge X position
+            pieceY                // piece Y position
+        );
+        
+        // Transform:
+        // 1. y -> height - y (for reverse direction)
+        // 2. x -> x (x is already negative displacement from left edge)
+        const transformedPath = leftPath.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g, 
+                             (match, x, y) => `L ${Number(x)},${Number(height) - Number(y)}`);
+        
+        path += ' ' + transformedPath;
     } else {
-        path += ` V 0`;
+        path += ` V 0`;           // Straight line if no cut
     }
     
     // Close the path
     path += ' Z';
     
     return path;
-}
-
-/**
- * Transforms an SVG path by rotating and translating it
- * @param {string} pathStr - The original SVG path string
- * @param {Object} transform - Contains rotate (degrees), translateX, translateY
- * @returns {string} Transformed path string
- */
-function transformPath(pathStr, transform) {
-    // This is a simplistic implementation that assumes the path starts with "M x,y"
-    // A more robust implementation would parse and transform each path command
-    
-    // For now, we'll return a simple placeholder
-    // In a real implementation, we'd parse the path, apply the transformation
-    // matrix to each point, and rebuild the path string
-    
-    const { rotate = 0, translateX = 0, translateY = 0 } = transform;
-    
-    // For our simple case, we can use SVG transforms directly
-    // Just make sure the transformed path connects properly to the main path
-    
-    if (pathStr.startsWith('M 0,0')) {
-        // If the path starts at the origin, we can just return the rest
-        // after transforming based on the rotation direction
-        
-        const pathWithoutStart = pathStr.substring(5).trim();
-        
-        if (rotate === 90) {
-            return `V ${translateY} ${pathWithoutStart}`;
-        } else if (rotate === 180) {
-            return `H ${translateX} ${pathWithoutStart}`;
-        } else if (rotate === 270) {
-            return `V ${translateY} ${pathWithoutStart}`;
-        } else {
-            return pathWithoutStart;
-        }
-    }
-    
-    // Fallback to a direct line if we can't transform properly
-    if (rotate === 90) {
-        return `V ${height}`;
-    } else if (rotate === 180) {
-        return `H 0`;
-    } else if (rotate === 270) {
-        return `V 0`;
-    } else {
-        return `H ${width}`;
-    }
 }
