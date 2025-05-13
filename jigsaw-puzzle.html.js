@@ -2,6 +2,7 @@
 
 /**
  * Returns the HTML string for the jigsaw-puzzle component's Shadow DOM.
+ * This structure includes a viewport, a board for the grid, and a separate container for the pieces.
  * @returns {string} HTML string.
  */
 export function getJigsawPuzzleHTML() {
@@ -29,25 +30,49 @@ export function getJigsawPuzzleHTML() {
                  /* jigsaw-viewport handles its own transform */
             }
 
-            /* Style for the board component slotted into the viewport */
-            jigsaw-board {
-                /* jigsaw-board fills the viewport and handles its own internal SVG/grid/slot */
+            /* Container inside viewport holding board and pieces */
+            #viewport-content {
                  position: absolute;
                  top: 0;
                  left: 0;
                  width: 100%; /* Fills the viewport */
                  height: 100%; /* Fills the viewport */
+                 /* Note: This container does NOT get the viewport transform.
+                    The transform is applied by jigsaw-viewport's internal container. */
             }
 
-            /* Styles for jigsaw-piece components slotted *inside* jigsaw-board */
-            /* These need to be relative to the board's coordinate system (defined by board's viewBox) */
-             /* jigsaw-piece components handle their own positioning (top/left/transform) */
-             /* based on their x, y, rotation attributes */
-            ::slotted(jigsaw-piece) {
-                position: absolute; /* Positioned within the viewport/board container */
-                 /* Visual styles (size, transform, selected, snapped, etc.) managed by jigsaw-piece component itself */
+            /* Style for the board component within the viewport content */
+            jigsaw-board {
+                /* jigsaw-board renders grid and sets the SVG viewBox. */
+                /* It should be positioned relative to the viewport content's 0,0 */
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%; /* Fills the viewport content */
+                height: 100%; /* Fills the viewport content */
+                 /* Background color handled by jigsaw-board */
             }
 
+            /* Container for the jigsaw-piece components */
+            #pieces-container {
+                position: absolute;
+                top: 0; /* Align with the start of the board's coordinate space */
+                left: 0; /* Align with the start of the board's coordinate space */
+                 /* This container needs to be sized to encompass the whole board/scatter area */
+                 /* Its size should match the dimensions defined by the jigsaw-board's viewBox */
+                 /* The size will be set programmatically by jigsaw-puzzle */
+                width: 1000px; /* Placeholder, will be set by JS */
+                height: 1000px; /* Placeholder, will be set by JS */
+                pointer-events: none; /* Allow events to pass through to jigsaw-board for panning */
+                z-index: 1; /* Ensure pieces are above the grid */
+            }
+
+             /* Style for jigsaw-piece components inside the pieces-container */
+            jigsaw-piece {
+                position: absolute; /* Positioned within #pieces-container */
+                 /* Their top/left/transform are set by the component based on x/y/rotation attributes */
+                 pointer-events: all; /* Pieces should capture pointer events */
+            }
 
             /* Controls component */
             jigsaw-controls {
@@ -84,10 +109,15 @@ export function getJigsawPuzzleHTML() {
 
         <!-- The viewport component, manages pan/zoom transform -->
         <jigsaw-viewport id="jigsaw-viewport">
-            <!-- The board component, renders grid and slots pieces -->
-            <jigsaw-board id="jigsaw-board"></jigsaw-board>
-            <!-- JigsawPiece elements will be appended directly to jigsaw-board,
-                 which will slot them. -->
+             <!-- Container for content that should be panned/zoomed -->
+            <div id="viewport-content">
+                <!-- The board component, renders grid and sets SVG viewBox -->
+                <jigsaw-board id="jigsaw-board"></jigsaw-board>
+                <!-- Container for jigsaw-piece elements -->
+                <div id="pieces-container">
+                    <!-- JigsawPiece elements will be appended here -->
+                </div>
+            </div>
         </jigsaw-viewport>
 
         <!-- The controls component -->
