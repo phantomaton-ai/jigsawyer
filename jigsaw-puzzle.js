@@ -4,17 +4,19 @@
 import { Viewport } from './viewport.js';
 import { Puzzle } from './puzzle.js';
 import { ImageInfo } from './image.js';
-// Import JigsawPiece component (HTMLElement)
-import { JigsawPiece, createMoveEndEvent } from './jigsaw-piece.js'; // Assumes jigsaw-piece.js defines and exports JigsawPiece HTMLElement and createMoveEndEvent
-import { JigsawBoard } from './jigsaw-board.js'; // Assumes jigsaw-board.js defines and exports JigsawBoard HTMLElement
-import { JigsawControls } from './jigsaw-controls.js'; // Assumes jigsaw-controls.js defines and exports JigsawControls HTMLElement
+// Import view components (should be defined and exported in their respective files)
+import { JigsawViewport } from './jigsaw-viewport.js';
+import { JigsawBoard } from './jigsaw-board.js';
+import { JigsawControls } from './jigsaw-controls.js';
+import { JigsawPiece, createMoveEndEvent } from './jigsaw-piece.js'; // Used to create piece elements and listen for its events
 // Import custom event creators (used here for clarity, not strictly necessary if event objects are created directly)
-import { createPanEvent } from './pan.js'; // Not dispatched here, but useful for types/detail structure
-import { createZoomEvent } from './zoom.js';
-import { createSelectEvent } from './select.js';
-import { createRotateEvent } from './rotate.js';
+import { createSelectEvent } from './select.js'; // Used to dispatch deselect
 
 import { Position } from './position.js'; // Needed for coordinate handling
+
+// Import the HTML structure function
+import { getJigsawPuzzleHTML } from './jigsaw-puzzle.html.js';
+
 
 // Default dimensions if not provided or image fails
 const DEFAULT_IMAGE_WIDTH = 1344;
@@ -29,10 +31,11 @@ export class JigsawPuzzle extends HTMLElement {
         // Domain Models
         this._imageInfo = null; // ImageInfo instance
         this._puzzle = null;    // Puzzle instance
-        this._viewport = null;  // Viewport instance
+        this._viewportModel = null;  // Viewport instance (managed by JigsawViewport component)
 
         // View Components managed by the controller
-        this._jigsawBoard = null; // JigsawBoard instance
+        this._jigsawViewport = null; // JigsawViewport instance
+        this._jigsawBoard = null; // JigsawBoard instance (slotted inside viewport)
         this._jigsawControls = null; // JigsawControls instance
         this._jigsawPieces = new Map(); // Map<pieceId, JigsawPiece HTMLElement>
 
@@ -41,7 +44,7 @@ export class JigsawPuzzle extends HTMLElement {
         this._activeDrag = null; // { pieceId, offsetX, offsetY } in world coords during a drag
 
         // DOM References (basic structure within shadow DOM)
-        this._pieceContainer = null; // Div to hold <jigsaw-piece> elements
+        this._pieceContainer = null; // <jigsaw-board> component acts as the container for pieces via slot
         this._winMessageContainer = null;
     }
 
@@ -78,100 +81,24 @@ export class JigsawPuzzle extends HTMLElement {
     connectedCallback() {
         console.log('JigsawPuzzle element connected. Initializing controller...');
 
-        // Set up the basic container structure in the Shadow DOM
-        this.shadowRoot.innerHTML = `
-            <style>
-                :host {
-                    display: block;
-                    position: relative;
-                    width: 100%;
-                    height: 100%;
-                    overflow: hidden; /* Crucial for pan/zoom effect */
-                    background-color: #1a1a1a; /* Default dark background */
-                    font-family: sans-serif; /* Default font for text */
-                    touch-action: none; /* Disable default touch gestures on the host */
-                    user-select: none; /* Prevent text selection */
-                }
-
-                /* Styles for slotted pieces (managed by jigsaw-board's slot) */
-                ::slotted(jigsaw-piece) {
-                    position: absolute; /* Allows pieces to be positioned absolutely by their x/y attributes */
-                     /* Transition, z-index, filter, cursor are managed by jigsaw-piece styles */
-                }
-
-                /* The container for the board and pieces */
-                #board-and-pieces-container {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    transform-origin: 0 0; /* Important for viewport transform */
-                }
-
-                jigsaw-board {
-                    /* jigsaw-board fills its container and handles grid rendering/input events */
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                }
-
-                #win-message-container {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    display: none; /* Hidden by default */
-                    justify-content: center;
-                    align-items: center;
-                    background-color: rgba(0,0,0,0.7);
-                    z-index: 1000; /* Very high */
-                }
-
-                #win-message {
-                    font-size: 2.5em;
-                    color: #ffca28; /* Bright, celebratory orange/yellow */
-                    text-align: center;
-                    padding: 30px;
-                    background-color: #333;
-                    border: 3px solid #ffca28;
-                    border-radius: 15px;
-                    box-shadow: 0 0 30px rgba(255, 202, 40, 0.8);
-                    text-shadow: 2px 2px #000;
-                    font-family: 'Comic Sans MS', 'Chalkboard SE', 'Bradley Hand', cursive;
-                }
-            </style>
-
-            <!-- This container gets the Viewport transform -->
-            <div id="board-and-pieces-container">
-                 <!-- jigsaw-board renders grid and slot for pieces -->
-                <jigsaw-board id="jigsaw-board"></jigsaw-board>
-                 <!-- Pieces (<jigsaw-piece>) will be slotted inside jigsaw-board -->
-            </div>
-
-            <!-- Controls component -->
-            <jigsaw-controls id="jigsaw-controls"></jigsaw-controls>
-
-            <!-- Win message -->
-            <div id="win-message-container">
-                <div id="win-message">🎉 YOU SOLVED IT, YOU MAGNIFICENT IDIOT! 🎉</div>
-            </div>
-        `;
+        // Set up the Shadow DOM structure using the HTML helper
+        this.shadowRoot.innerHTML = getJigsawPuzzleHTML();
 
         // Get DOM references for managed components and containers
+        this._jigsawViewport = this.shadowRoot.getElementById('jigsaw-viewport');
         this._jigsawBoard = this.shadowRoot.getElementById('jigsaw-board');
         this._jigsawControls = this.shadowRoot.getElementById('jigsaw-controls');
-        this._pieceContainer = this._jigsawBoard; // <jigsaw-piece> elements are slotted into jigsaw-board
         this._winMessageContainer = this.shadowRoot.getElementById('win-message-container');
-        this._boardAndPiecesContainer = this.shadowRoot.getElementById('board-and-pieces-container');
+        // The piece container is the jigsaw-board itself, as it uses a slot
+        this._pieceContainer = this._jigsawBoard;
 
 
-        // Initialize Viewport domain model
-        const hostRect = this.getBoundingClientRect();
-        this._viewport = new Viewport(hostRect.width || DEFAULT_IMAGE_WIDTH, hostRect.height || DEFAULT_IMAGE_HEIGHT); // Use defaults if host not sized initially
+        // The Viewport domain model is managed *internally* by the JigsawViewport component.
+        // We will interact with it via the JigsawViewport component's methods/attributes.
+        // We don't need a separate _viewportModel instance here in the controller.
+        // Let's update the variable name for clarity to _viewportComponent.
+        this._viewportComponent = this._jigsawViewport;
+
 
         // Add event listeners for custom events from children components
         this._addEventListeners();
@@ -189,29 +116,16 @@ export class JigsawPuzzle extends HTMLElement {
             this._initializePuzzle(dummyImageInfo, initialSize);
         }
 
-        // Use ResizeObserver to update viewport dimensions if the host element is resized
-        this._resizeObserver = new ResizeObserver(entries => {
-            for (let entry of entries) {
-                const { width, height } = entry.contentRect;
-                console.log(`Host resized to ${width}x${height} 📏`);
-                this._viewport.setHostDimensions(width, height);
-                this._renderViewport(); // Re-apply the viewport transform
-            }
-        });
-        this._resizeObserver.observe(this);
+        // The JigsawViewport component uses a ResizeObserver to handle host resizing.
+        // We just need to ensure its initial size is correct (handled by CSS) and it's connected.
 
-        // Initial viewport render to apply transforms
-        this._renderViewport();
+        // Initial viewport state (centering on the board) will happen AFTER puzzle is initialized
+        // in _initializePuzzle.
     }
 
     disconnectedCallback() {
         console.log('JigsawPuzzle element removed from DOM. 👻 Goodbye!');
-        // Clean up ResizeObserver
-        if (this._resizeObserver) {
-            this._resizeObserver.disconnect();
-        }
-        // Global listeners added by JigsawPiece components should be cleaned up by them in their disconnectedCallback.
-        // If JigsawPuzzle added any global listeners, remove them here. (It currently doesn't).
+        // Components like JigsawViewport and JigsawPiece should clean up their own observers/global listeners.
     }
 
     // --- Initialization Steps ---
@@ -241,46 +155,57 @@ export class JigsawPuzzle extends HTMLElement {
     }
 
     _initializePuzzle(imageInfo, pieceCount) {
-        if (!imageInfo || !pieceCount) {
-            console.warn("👻 Waiting for image info or piece count before initializing puzzle.");
+        if (!imageInfo || !pieceCount || pieceCount <= 0) {
+            console.warn("👻 Cannot initialize puzzle domain model: missing image info or invalid piece count.");
             return;
         }
+         if (!this._jigsawBoard || !this._viewportComponent) {
+             console.warn("👻 Cannot initialize puzzle views: missing board or viewport components.");
+             // This shouldn't happen if connectedCallback ran correctly, but defensive check.
+             return;
+         }
+
         console.log(`Initializing puzzle domain model: ${pieceCount} pieces, image ${imageInfo.width}x${imageInfo.height}`);
 
         // Create the Puzzle domain model instance
         this._puzzle = new Puzzle(imageInfo, pieceCount);
 
-        // Configure JigsawBoard attributes based on the Puzzle model
-        if (this._jigsawBoard) {
-             this._jigsawBoard.setAttribute('grid-width', this._puzzle.image.width); // Grid matches image size for now
-             this._jigsawBoard.setAttribute('grid-height', this._puzzle.image.height);
-             this._jigsawBoard.setAttribute('rows', this._puzzle.rows);
-             this._jigsawBoard.setAttribute('cols', this._puzzle.cols);
-             // Initial viewBox should cover the whole board area
-             const boardWidth = this._puzzle.boardMaximum.x - this._puzzle.boardMinimum.x;
-             const boardHeight = this._puzzle.boardMaximum.y - this._puzzle.boardMinimum.y;
-             this._jigsawBoard.setAttribute('view-x', this._puzzle.boardMinimum.x);
-             this._jigsawBoard.setAttribute('view-y', this._puzzle.boardMinimum.y);
-             this._jigsawBoard.setAttribute('view-width', boardWidth);
-             this._jigsawBoard.setAttribute('view-height', boardHeight);
-        }
+        // Configure JigsawBoard attributes based on the Puzzle model's grid
+        // The board needs to know the dimensions of the assembled puzzle grid (world units)
+        // and the number of rows/cols to draw its dots.
+        this._jigsawBoard.setAttribute('grid-width', this._puzzle.image.width); // Grid matches image size for now
+        this._jigsawBoard.setAttribute('grid-height', this._puzzle.image.height);
+        this._jigsawBoard.setAttribute('rows', this._puzzle.rows);
+        this._jigsawBoard.setAttribute('cols', this._puzzle.cols);
+
+        // The board also needs to know the total board dimensions (including scatter area)
+        // so it can set its internal SVG viewBox correctly.
+        const boardWidth = this._puzzle.boardMaximum.x - this._puzzle.boardMinimum.x;
+        const boardHeight = this._puzzle.boardMaximum.y - this._puzzle.boardMinimum.y;
+        this._jigsawBoard.setAttribute('view-x', this._puzzle.boardMinimum.x);
+        this._jigsawBoard.setAttribute('view-y', this._puzzle.boardMinimum.y);
+        this._jigsawBoard.setAttribute('view-width', boardWidth);
+        this._jigsawBoard.setAttribute('view-height', boardHeight);
 
 
         // Generate and render the JigsawPiece web components
         this._generatePieceViews();
 
-        // Center the viewport on the initial scatter area of the board
-         const boardWidth = this._puzzle.boardMaximum.x - this._puzzle.boardMinimum.x;
-         const boardHeight = this._puzzle.boardMaximum.y - this._puzzle.boardMinimum.y;
-         const boardCenterX = this._puzzle.boardMinimum.x + boardWidth / 2;
-         const boardCenterY = this._puzzle.boardMinimum.y + boardHeight / 2;
-         const hostRect = this.getBoundingClientRect();
-         const hostCenterX = hostRect.width / 2;
-         const hostCenterY = hostRect.height / 2;
-         // Calculate viewBox position needed to show world (boardCenterX, boardCenterY) at screen (hostCenterX, hostCenterY)
-         this._viewport.viewBoxX = boardCenterX - hostCenterX / this._viewport.zoomLevel;
-         this._viewport.viewBoxY = boardCenterY - hostCenterY / this._viewport.zoomLevel;
-         this._renderViewport(); // Apply the initial viewport transform
+        // Set the initial viewport position and zoom level via the JigsawViewport component.
+        // Center the viewport on the initial scatter area of the board.
+        const boardCenterX = this._puzzle.boardMinimum.x + boardWidth / 2;
+        const boardCenterY = this._puzzle.boardMinimum.y + boardHeight / 2;
+        const initialZoom = 1; // Start at 1x zoom
+
+        // Calculate the required viewBox position to center the board area
+        const hostRect = this.getBoundingClientRect();
+        const hostCenterX = hostRect.width / 2;
+        const hostCenterY = hostRect.height / 2;
+        const initialViewBoxX = boardCenterX - hostCenterX / initialZoom;
+        const initialViewBoxY = boardCenterY - hostCenterY / initialZoom;
+
+        // Set the initial view on the viewport component
+        this._viewportComponent.setView(initialViewBoxX, initialViewBoxY, initialZoom);
 
         // Check win condition immediately (e.g., for a 1-piece puzzle)
         this._checkWinCondition();
@@ -318,66 +243,60 @@ export class JigsawPuzzle extends HTMLElement {
             pieceElement.setAttribute('correct-x', pieceData.origination.x);
             pieceElement.setAttribute('correct-y', pieceData.origination.y);
 
-            // Pass the generated SVG path data
+            // Pass the generated SVG path data from the Piece model
             pieceElement.setAttribute('path-data', pieceData.svgPathData);
 
-            // Set initial selected/snapped states if applicable (should be false initially)
+            // Set initial selected/snapped states if applicable (should be false initially for new pieces)
             if (pieceData.isSelected) pieceElement.setAttribute('selected', '');
             if (pieceData.isSnapped) pieceElement.setAttribute('snapped', '');
 
             // Append the piece element to the container (jigsaw-board's slot)
+            // The jigsaw-board uses a <slot> to render these children inside its SVG context.
             this._pieceContainer.appendChild(pieceElement);
 
             // Store the component instance by piece ID
             this._jigsawPieces.set(pieceData.id, pieceElement);
 
-            // Optionally, pass the domain model reference to the component (useful if complex data isn't reflected in attributes)
-            // pieceElement.setPieceData(pieceData); // Requires setPieceData method on JigsawPiece
+            // No longer need to pass the full pieceData object if attributes are sufficient.
+            // pieceElement.setPieceData(pieceData); // Removed as per strategy.
         });
         console.log(`Generated ${this._jigsawPieces.size} JigsawPiece web components.`);
     }
 
 
-    // --- Viewport Management (Applies transforms based on Viewport model) ---
+    // --- Viewport Management (Delegated to JigsawViewport) ---
+    // JigsawViewport component manages the Viewport model and applies the CSS transform.
+    // This controller just needs to tell the viewport component when to update its view
+    // (e.g., after a zoom/pan event).
 
     _renderViewport() {
-        if (!this._viewport || !this._boardAndPiecesContainer) {
-            console.warn("Cannot render viewport: missing viewport or boardAndPiecesContainer.");
-            return;
-        }
-        // Apply the viewport transformation (pan and zoom) to the container holding the board and pieces
-        // The Viewport class calculates the necessary CSS transform string.
-        this._boardAndPiecesContainer.style.transform = this._viewport.getPuzzleAreaTransform();
-
-         console.log(`Viewport Rendered: Zoom ${this._viewport.zoomLevel.toFixed(2)}, Pan (${this._viewport.viewBoxX.toFixed(0)}, ${this._viewport.viewBoxY.toFixed(0)})`);
-
-         // Although jigsaw-board sets its own viewBox, this CSS transform on the container
-         // is what makes the pan and zoom visually apply to both the board and the slotted pieces.
-
-         // Optional: Update piece stroke width based on zoom level if needed
-         // this._jigsawPieces.forEach(pieceEl => {
-         //     // pieceEl.updateStrokeWidth(1 / this._viewport.zoomLevel); // Requires method on JigsawPiece
-         // });
+         // This method is now redundant here. The JigsawViewport component
+         // handles its own rendering when its internal Viewport model changes
+         // via its pan/zoom methods or resize observer.
+         // Keeping the call here for clarity that the viewport is conceptually 'rendered'.
+         // The actual transform application happens inside JigsawViewport.
+         console.log("Controller triggered viewport render (handled by JigsawViewport).");
     }
 
     // --- Event Listeners Setup ---
 
     _addEventListeners() {
-        console.log("Adding event listeners...");
-        // Listen for custom events bubbling up from child components (jigsaw-board, jigsaw-piece, jigsaw-controls)
+        console.log("Controller adding event listeners...");
+        // Listen for custom events bubbling up from child components:
+        // 'select', 'move', 'moveend' from JigsawPiece components
+        // 'pan', 'zoom' from JigsawBoard component
+        // No events expected from JigsawControls, it dispatches events listened to here.
+
         this.addEventListener('select', this._handleSelectEvent.bind(this));
         this.addEventListener('move', this._handleMoveEvent.bind(this));
         this.addEventListener('moveend', this._handleMoveEndEvent.bind(this));
         this.addEventListener('rotate', this._handleRotateEvent.bind(this));
-        this.addEventListener('pan', this._handlePanEvent.bind(this));
-        this.addEventListener('zoom', this._handleZoomEvent.bind(this));
-
-        // Listen for clicks directly on the host element (might be needed for deselect if clicking outside board/controls)
-        // Less critical now that jigsaw-board handles background clicks.
+        this.addEventListener('pan', this._handlePanEvent.bind(this)); // Listen for pan from jigsaw-board/controls
+        this.addEventListener('zoom', this._handleZoomEvent.bind(this)); // Listen for zoom from jigsaw-board/controls
     }
 
     // --- Custom Event Handlers (Controller Logic) ---
-    // These methods update the domain models and subsequently the view components (via attributes).
+    // These methods update the domain models and subsequently the view components (by setting attributes).
 
     _handleSelectEvent(event) {
         event.stopPropagation(); // Stop the select event from bubbling further
@@ -390,14 +309,14 @@ export class JigsawPuzzle extends HTMLElement {
             const previouslySelectedPieceData = this._puzzle?.getPieceById(this._selectedPieceId);
             const previouslySelectedPieceView = this._jigsawPieces.get(this._selectedPieceId);
 
-            if (previouslySelectedPieceData) previouslySelectedPieceData.isSelected = false; // Update model
+            if (previouslySelectedPieceData) previouslySelectedPieceData.isSelected = false; // Update model (optional, controller state is primary)
             if (previouslySelectedPieceView) previouslySelectedPieceView.removeAttribute('selected'); // Update view
 
-             // Update controls component
+             // Update controls component to hide piece actions
              if (this._jigsawControls) this._jigsawControls.removeAttribute('selected-piece-id');
 
              this._selectedPieceId = null; // Update controller state
-             this._activeDrag = null; // Clear any active drag state
+             this._activeDrag = null; // Clear any active drag state for the old piece
             console.log(`Piece ${previouslySelectedPieceData?.id} deselected.`);
         }
 
@@ -408,23 +327,28 @@ export class JigsawPuzzle extends HTMLElement {
             const pieceView = this._jigsawPieces.get(pieceIdToSelect);
 
             if (pieceData && pieceView) {
-                pieceData.isSelected = true; // Update model
+                pieceData.isSelected = true; // Update model (optional)
                 pieceView.setAttribute('selected', ''); // Update view (adds attribute, triggers component's updateSelectedState)
 
                 this._selectedPieceId = pieceIdToSelect; // Update controller state
 
-                // Update controls component to show piece actions
+                // Update controls component to show piece actions for this piece
                 if (this._jigsawControls) this._jigsawControls.setAttribute('selected-piece-id', pieceIdToSelect);
 
-                // --- Prepare for Drag ---
-                // Calculate and store the drag offset in world coordinates.
-                // This offset is the difference between the world position of the pointer
-                // at the start of the drag and the world position of the piece's top-left corner.
+                // --- Prepare for Drag (if pointer coords are available) ---
+                // The 'select' event from jigsaw-piece *should* include clientX/Y from pointerdown.
                 if (pointerClientX !== undefined && pointerClientY !== undefined) {
-                     const hostRect = this.getBoundingClientRect();
-                     const screenX = pointerClientX - hostRect.left; // Pointer pos relative to host
-                     const screenY = pointerClientY - hostRect.top;
-                     const worldDownCoords = this._viewport.toWorldCoordinates(screenX, screenY); // Pointer pos in world coords
+                     // Calculate and store the drag offset in world coordinates.
+                     // Need the viewport's current state to convert screen to world.
+                     const currentViewState = this._viewportComponent.getViewState();
+                     const hostRect = this.getBoundingClientRect(); // Bounding rect of the *main* jigsaw-puzzle component
+
+                     // Convert pointer screen position (relative to viewport) to world coordinates
+                     // Use the Viewport component's internal method for this conversion
+                     const worldDownCoords = this._viewportComponent._viewport.toWorldCoordinates(
+                         pointerClientX - hostRect.left, // Pointer X relative to viewport host
+                         pointerClientY - hostRect.top  // Pointer Y relative to viewport host
+                     );
 
                      const offsetX = worldDownCoords.x - pieceData.placement.x;
                      const offsetY = worldDownCoords.y - pieceData.placement.y;
@@ -432,19 +356,19 @@ export class JigsawPuzzle extends HTMLElement {
                      this._activeDrag = { pieceId: pieceIdToSelect, offsetX, offsetY };
                      console.log(`Piece ${pieceIdToSelect} selected. ✨ Drag tracking started with offset (${offsetX.toFixed(2)}, ${offsetY.toFixed(2)}).`);
                 } else {
-                     console.warn("Select event missing clientX/Y. Cannot calculate drag offset for drag start.");
-                     this._activeDrag = null; // Cannot start drag
+                     console.warn("Select event missing clientX/Y. Cannot calculate initial drag offset. Drag may not work correctly.");
+                     this._activeDrag = null; // Cannot start drag without initial pointer position
                 }
 
             } else {
                 console.error(`Select event for invalid piece ID: ${pieceIdToSelect}. Data or view not found.`);
-                // Ensure controller state is clean if something went wrong
+                // Clean up controller state if something went wrong
                 this._selectedPieceId = null;
                 if (this._jigsawControls) this._jigsawControls.removeAttribute('selected-piece-id');
                  this._activeDrag = null;
             }
         }
-        // If pieceIdToSelect was null but no piece was selected, or clicked already selected piece - do nothing, state is already correct.
+        // If pieceIdToSelect was null but no piece was selected, or clicked already selected piece - do nothing.
     }
 
     _handleMoveEvent(event) {
@@ -452,7 +376,7 @@ export class JigsawPuzzle extends HTMLElement {
         const { pieceId, clientX, clientY } = event.detail;
         // console.log(`Controller handling move event for piece ID: ${pieceId} to screen (${clientX}, ${clientY})`); // Too verbose during drag
 
-        // Only process move if there's an active drag for the same piece that's also selected
+        // Only process move if there's an active drag for the same piece that's also the selected piece
         if (!this._activeDrag || this._activeDrag.pieceId !== pieceId || this._selectedPieceId !== pieceId) {
             // console.warn(`Move event for piece ${pieceId} ignored (no active drag or not selected).`);
             return; // Ignore move events if not actively dragging/selected
@@ -468,10 +392,13 @@ export class JigsawPuzzle extends HTMLElement {
         }
 
         // Convert current pointer screen coordinates (relative to viewport) to world coordinates
-        const hostRect = this.getBoundingClientRect();
-        const currentScreenX = clientX - hostRect.left; // Pointer pos relative to host
-        const currentScreenY = clientY - hostRect.top;
-        const worldCoords = this._viewport.toWorldCoordinates(currentScreenX, currentScreenY); // Pointer pos in world coords
+        // Use the Viewport component's internal method for this conversion
+        const hostRect = this.getBoundingClientRect(); // Bounding rect of the *main* jigsaw-puzzle component
+        const worldCoords = this._viewportComponent._viewport.toWorldCoordinates(
+             clientX - hostRect.left, // Pointer X relative to viewport host
+             clientY - hostRect.top  // Pointer Y relative to viewport host
+        );
+
 
         // Calculate the new piece placement (top-left world coords) using the stored offset
         const newPieceWorldX = worldCoords.x - this._activeDrag.offsetX;
@@ -479,13 +406,15 @@ export class JigsawPuzzle extends HTMLElement {
         const newPiecePlacement = new Position(newPieceWorldX, newPieceWorldY);
 
         // Update the piece's position in the domain model
-        pieceData.place(newPiecePlacement); // This updates pieceData.placement
+        // Only update if the position has actually changed significantly to avoid unnecessary DOM updates
+        if (!pieceData.placement.equals(newPiecePlacement)) {
+             pieceData.place(newPiecePlacement); // This updates pieceData.placement
 
-        // Update the piece's view element by setting its attributes
-        pieceView.setAttribute('x', pieceData.placement.x);
-        pieceView.setAttribute('y', pieceData.placement.y);
-
-        // The piece view component's attributeChangedCallback will handle updating its visual transform.
+             // Update the piece's view element by setting its attributes
+             pieceView.setAttribute('x', pieceData.placement.x);
+             pieceView.setAttribute('y', pieceData.placement.y);
+             // The piece view component's attributeChangedCallback will handle updating its visual transform.
+        }
     }
 
     _handleMoveEndEvent(event) {
@@ -510,10 +439,11 @@ export class JigsawPuzzle extends HTMLElement {
         }
 
         // Attempt to snap the piece to the grid
-        const snapThreshold = pieceData.width / 3; // Dynamic threshold in world units
+        const snapThreshold = pieceData.width / 3; // Use dynamic threshold in world units
         const snapped = pieceData.snap(snapThreshold); // Updates pieceData.isSnapped and pieceData.placement/rotation if snapped
 
         // Update the piece's view attributes based on its final state after potential snap
+        // Use pieceData properties as they reflect the snapped state's changes (if any)
         pieceView.setAttribute('x', pieceData.placement.x);
         pieceView.setAttribute('y', pieceData.placement.y);
         pieceView.setAttribute('rotation', pieceData.rotation);
@@ -536,9 +466,8 @@ export class JigsawPuzzle extends HTMLElement {
              this.dispatchEvent(createSelectEvent(null));
         }
 
-
         // Check overall win condition after snap attempt
-        if (snapped && this._puzzle?.isSolved()) {
+         if (this._puzzle?.isSolved()) { // Check puzzle state after potential snap
             this._showWinMessage();
         }
     }
@@ -567,12 +496,14 @@ export class JigsawPuzzle extends HTMLElement {
 
         // Update the piece's view attribute for rotation
         pieceView.setAttribute('rotation', pieceData.rotation);
+        // The piece view's attributeChangedCallback will handle the visual update.
 
         // Check for snap after rotation (only snaps if rotation becomes 0 and position is close)
         const snapThreshold = pieceData.width / 3; // Use dynamic threshold
         const snapped = pieceData.snap(snapThreshold); // Updates pieceData.isSnapped and pieceData.placement/rotation if snapped
 
         // Update the piece's view based on new snapped state and potential position/rotation change from snap
+        // Use pieceData properties as they reflect the snapped state's changes (if any)
         pieceView.setAttribute('x', pieceData.placement.x); // Apply final position from snap
         pieceView.setAttribute('y', pieceData.placement.y);
         pieceView.setAttribute('rotation', pieceData.rotation); // Apply final rotation from snap
@@ -590,7 +521,7 @@ export class JigsawPuzzle extends HTMLElement {
         }
 
         // Check win condition if snapped
-         if (snapped && this._puzzle?.isSolved()) {
+         if (this._puzzle?.isSolved()) { // Check puzzle state after potential snap
             this._showWinMessage();
         }
     }
@@ -600,41 +531,32 @@ export class JigsawPuzzle extends HTMLElement {
         const { dx, dy } = event.detail;
         // console.log(`Controller handling pan event: dx=${dx}, dy=${dy}`); // Too verbose
 
-        if (!this._viewport) return;
+        if (!this._viewportComponent) return;
 
-        // Update the Viewport domain model
-        this._viewport.pan(dx, dy);
-
-        // Re-render the viewport transform on the container holding board and pieces
-        this._renderViewport();
-        // No need to update jigsaw-board attributes for pan, its viewBox is fixed.
+        // Delegate pan update to the JigsawViewport component
+        // The viewport component will update its internal model and apply the transform.
+        this._viewportComponent.pan(dx, dy);
     }
 
     _handleZoomEvent(event) {
         event.stopPropagation(); // Stop the zoom event from bubbling further
-        const { factor, clientX, clientY } = event.detail; // clientX/Y are screen coords relative to viewport/document
+        const { factor, clientX, clientY } = event.detail; // clientX/Y are screen coords relative to original event target
 
         // console.log(`Controller handling zoom event: factor=${factor}, clientX=${clientX}, clientY=${clientY}`);
-        if (!this._viewport) return;
+        if (!this._viewportComponent) return;
 
-        // Zoom function needs pointer coordinates relative to the host element's top-left corner
-        let pointerX_host, pointerY_host;
-        if (clientX !== undefined && clientY !== undefined) {
-            const hostRect = this.getBoundingClientRect();
-            pointerX_host = clientX - hostRect.left;
-            pointerY_host = clientY - hostRect.top;
-        } // If clientX/Y are undefined (e.g., from button click), Viewport zooms to host center
+        // Delegate zoom update to the JigsawViewport component.
+        // JigsawViewport's zoom method needs pointer coords relative to its own host element.
+        // If clientX/Y came from a button (detail only has factor), JigsawViewport handles centering.
+        // If clientX/Y came from a pointer/wheel (detail has clientX/Y), we need to pass them.
+        this._viewportComponent.zoom(factor, clientX, clientY);
 
-        // Update the Viewport domain model. Viewport zoom method returns true if zoom level changed.
-        if (this._viewport.zoom(factor, pointerX_host, pointerY_host)) {
-            // If zoom changed, re-render the viewport transform
-            this._renderViewport();
-            // The jigsaw-board component's grid dots might need updating if their size scales with zoom.
-            // JigsawBoard currently draws fixed size dots based on its viewBox.
-            // If dynamic dot size is needed, update a jigsaw-board attribute here or call a method.
-            // For now, viewBox and CSS transform are enough for basic zoom.
-        }
+        // The JigsawViewport component will handle applying the transform and potentially
+        // triggering updates in its slotted content (like jigsaw-board redrawing dots).
+        // If piece styles (like stroke width) need to scale with zoom, we could iterate pieces here
+        // after the zoom, or let pieces listen for a 'viewport-changed' event from JigsawViewport.
     }
+
 
     // --- Win Condition ---
     _checkWinCondition() {
@@ -650,23 +572,27 @@ export class JigsawPuzzle extends HTMLElement {
         if (this._winMessageContainer) {
             this._winMessageContainer.style.display = 'flex';
         }
-        // Disable further interaction on the board area
-        if (this._boardAndPiecesContainer) this._boardAndPiecesContainer.style.pointerEvents = 'none'; // Prevent pointer events on the container
+        // Disable further interaction on the board area (delegated to viewport/board)
+        // We can add a boolean attribute to jigsaw-board/jigsaw-viewport to disable interactions.
+        // For now, directly disable pointer events on the viewport container.
+        if (this._viewportComponent) this._viewportComponent.style.pointerEvents = 'none';
+
         // Hide controls
         if (this._jigsawControls) this._jigsawControls.style.display = 'none';
-        // Deselect any selected piece visually
+
+        // Deselect any selected piece visually and in state
         if (this._selectedPieceId !== null) {
              const pieceView = this._jigsawPieces.get(this._selectedPieceId);
-             if(pieceView) pieceView.removeAttribute('selected');
-             this._selectedPieceId = null;
+             if(pieceView) pieceView.removeAttribute('selected'); // Update view
+             this._selectedPieceId = null; // Update controller state
         }
          // Ensure controls component updates visibility
         if (this._jigsawControls) this._jigsawControls.removeAttribute('selected-piece-id');
     }
 
-    // Unused/extraneous methods like toString removed.
+    // Extraneous methods like toString removed.
 }
 
-// Custom element definition will be in the main entry file (jigsawyer.js)
+// Register the custom element in the main entry file (jigsawyer.js)
 // customElements.define('jigsaw-puzzle', JigsawPuzzle);
 // console.log('🧩 JigsawPuzzle custom element definition ready.');
