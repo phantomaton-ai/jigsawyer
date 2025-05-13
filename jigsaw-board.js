@@ -1,72 +1,79 @@
-// jigsaw-board.js - Component for the puzzle board, grid, and panning/zooming functionality
+// jigsaw-board.js - Component for the puzzle background grid and user interaction events
 
 import { createPanEvent } from './pan.js';
 import { createZoomEvent } from './zoom.js';
-import { Viewport } from './viewport.js';
 
 /**
- * JigsawBoard web component - handles the background grid, viewport panning and zooming
+ * JigsawBoard web component - renders the background grid and dispatches pan/zoom events
+ * This is a "controlled component" that receives its configuration via attributes
+ * and notifies its parent of user interactions through custom events.
  */
 export class JigsawBoard extends HTMLElement {
     constructor() {
         super();
         this.attachShadow({ mode: 'open' });
         
-        this._viewport = null;
-        this._puzzleWidth = 0;
-        this._puzzleHeight = 0;
+        // Grid configuration
+        this._gridWidth = 0;
+        this._gridHeight = 0;
         this._rows = 0;
         this._cols = 0;
-        this._pieceWidth = 0;
-        this._pieceHeight = 0;
         
-        // State for panning
+        // Tracking for interaction events
         this._isPanning = false;
         this._panStartX = 0;
         this._panStartY = 0;
-        
-        // State for pinch-zoom
         this._touchCache = [];
-
-        // DOM elements
-        this._container = null;
-        this._svgGrid = null;
-        this._gridGroup = null;
     }
     
     static get observedAttributes() {
         return [
-            'width',
-            'height',
-            'rows',
-            'cols'
+            'grid-width',   // Width of the grid in world units
+            'grid-height',  // Height of the grid in world units
+            'rows',         // Number of rows in the grid
+            'cols',         // Number of columns in the grid
+            'view-x',       // Current viewBox X origin
+            'view-y',       // Current viewBox Y origin
+            'view-width',   // Current viewBox width
+            'view-height',  // Current viewBox height
+            'transform'     // CSS transform string for pan/zoom
         ];
     }
     
     attributeChangedCallback(name, oldValue, newValue) {
+        if (oldValue === newValue) return;
+        
         switch (name) {
-            case 'width':
-                this._puzzleWidth = parseFloat(newValue);
+            case 'grid-width':
+                this._gridWidth = parseFloat(newValue) || 0;
+                this._updateGrid();
                 break;
-            case 'height':
-                this._puzzleHeight = parseFloat(newValue);
+            case 'grid-height':
+                this._gridHeight = parseFloat(newValue) || 0;
+                this._updateGrid();
                 break;
             case 'rows':
-                this._rows = parseInt(newValue, 10);
+                this._rows = parseInt(newValue, 10) || 0;
+                this._updateGrid();
                 break;
             case 'cols':
-                this._cols = parseInt(newValue, 10);
+                this._cols = parseInt(newValue, 10) || 0;
+                this._updateGrid();
                 break;
-        }
-        
-        if (this.isConnected) {
-            this._calculatePieceDimensions();
-            this._drawGrid();
+            case 'view-x':
+            case 'view-y':
+            case 'view-width':
+            case 'view-height':
+                this._updateViewBox();
+                break;
+            case 'transform':
+                this._updateTransform();
+                break;
         }
     }
     
     connectedCallback() {
-        // Set up shadow DOM
+        // Create shadow DOM structure
         this.shadowRoot.innerHTML = `
             <style>
                 :host {
@@ -80,7 +87,7 @@ export class JigsawBoard extends HTMLElement {
                     touch-action: none;
                 }
                 
-                #container {
+                .container {
                     position: absolute;
                     top: 0;
                     left: 0;
@@ -89,7 +96,7 @@ export class JigsawBoard extends HTMLElement {
                     transform-origin: 0 0;
                 }
                 
-                #svg-grid {
+                svg {
                     position: absolute;
                     top: 0;
                     left: 0;
@@ -106,92 +113,118 @@ export class JigsawBoard extends HTMLElement {
                 }
             </style>
             
-            <div id="container">
-                <svg id="svg-grid">
-                    <g id="grid-group"></g>
+            <div class="container">
+                <svg>
+                    <g class="grid-group"></g>
                 </svg>
                 <slot></slot>
             </div>
         `;
         
-        // Get DOM references
-        this._container = this.shadowRoot.getElementById('container');
-        this._svgGrid = this.shadowRoot.getElementById('svg-grid');
-        this._gridGroup = this.shadowRoot.getElementById('grid-group');
-        
-        // Initialize viewport
-        const width = this.getBoundingClientRect().width;
-        const height = this.getBoundingClientRect().height;
-        this._viewport = new Viewport(width, height);
-        
-        // Calculate piece dimensions
-        this._calculatePieceDimensions();
-        
-        // Draw initial grid
-        this._drawGrid();
-        
-        // Add event listeners
+        // Add event listeners for user interaction
         this._addEventListeners();
+        
+        // Initialize grid if attributes are already set
+        this._updateGrid();
+        this._updateViewBox();
+        this._updateTransform();
     }
     
-    _calculatePieceDimensions() {
-        if (this._rows > 0 && this._cols > 0) {
-            this._pieceWidth = this._puzzleWidth / this._cols;
-            this._pieceHeight = this._puzzleHeight / this._rows;
-        }
+    disconnectedCallback() {
+        // Clean up any resources
     }
     
-    _drawGrid() {
+    /**
+     * Updates the grid dots based on rows, cols, and grid dimensions
+     */
+    _updateGrid() {
+        const gridGroup = this.shadowRoot.querySelector('.grid-group');
+        if (!gridGroup) return;
+        
         // Clear existing grid
-        this._gridGroup.innerHTML = '';
+        gridGroup.innerHTML = '';
         
+        // Check if we have enough information to draw the grid
         if (this._rows <= 0 || this._cols <= 0 || 
-            this._pieceWidth <= 0 || this._pieceHeight <= 0) {
-            return; // Not enough information to draw grid
+            this._gridWidth <= 0 || this._gridHeight <= 0) {
+            return;
         }
         
-        // Set SVG viewBox to puzzle dimensions
-        this._svgGrid.setAttribute('viewBox', `0 0 ${this._puzzleWidth} ${this._puzzleHeight}`);
+        const pieceWidth = this._gridWidth / this._cols;
+        const pieceHeight = this._gridHeight / this._rows;
         
         // Draw grid dots
         for (let r = 0; r < this._rows; r++) {
             for (let c = 0; c < this._cols; c++) {
                 const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                 dot.classList.add('grid-dot');
-                dot.setAttribute('cx', c * this._pieceWidth + this._pieceWidth / 2);
-                dot.setAttribute('cy', r * this._pieceHeight + this._pieceHeight / 2);
+                dot.setAttribute('cx', c * pieceWidth + pieceWidth / 2);
+                dot.setAttribute('cy', r * pieceHeight + pieceHeight / 2);
                 dot.setAttribute('r', 3);
-                this._gridGroup.appendChild(dot);
+                gridGroup.appendChild(dot);
             }
         }
     }
     
+    /**
+     * Updates the SVG viewBox based on attributes
+     */
+    _updateViewBox() {
+        const svg = this.shadowRoot.querySelector('svg');
+        if (!svg) return;
+        
+        const viewX = parseFloat(this.getAttribute('view-x') || 0);
+        const viewY = parseFloat(this.getAttribute('view-y') || 0);
+        const viewWidth = parseFloat(this.getAttribute('view-width') || this._gridWidth || 100);
+        const viewHeight = parseFloat(this.getAttribute('view-height') || this._gridHeight || 100);
+        
+        svg.setAttribute('viewBox', `${viewX} ${viewY} ${viewWidth} ${viewHeight}`);
+    }
+    
+    /**
+     * Updates the container transform based on the transform attribute
+     */
+    _updateTransform() {
+        const container = this.shadowRoot.querySelector('.container');
+        if (!container) return;
+        
+        const transform = this.getAttribute('transform');
+        if (transform) {
+            container.style.transform = transform;
+        }
+    }
+    
+    /**
+     * Adds event listeners for user interaction
+     */
     _addEventListeners() {
-        // Pan/zoom event listeners
+        // Mouse events
         this.addEventListener('mousedown', this._onMouseDown.bind(this));
         this.addEventListener('mousemove', this._onMouseMove.bind(this));
         this.addEventListener('mouseup', this._onMouseUp.bind(this));
         this.addEventListener('mouseleave', this._onMouseLeave.bind(this));
         
+        // Touch events
         this.addEventListener('touchstart', this._onTouchStart.bind(this), { passive: false });
         this.addEventListener('touchmove', this._onTouchMove.bind(this), { passive: false });
         this.addEventListener('touchend', this._onTouchEnd.bind(this), { passive: false });
         
+        // Wheel event for zooming
         this.addEventListener('wheel', this._onWheel.bind(this), { passive: false });
-        
-        // Set up a ResizeObserver to handle container resizing
-        this._resizeObserver = new ResizeObserver(entries => {
-            for (const entry of entries) {
-                const { width, height } = entry.contentRect;
-                this._viewport.setHostDimensions(width, height);
-                this._updateTransform();
-            }
-        });
-        this._resizeObserver.observe(this);
+    }
+    
+    /**
+     * Checks if the event target is part of the board background
+     * (not a slotted piece or other element)
+     */
+    _isBackgroundTarget(target) {
+        // Check if the target is part of the board's shadow DOM or the host itself
+        return target === this || 
+               this.shadowRoot.contains(target);
     }
     
     _onMouseDown(event) {
-        // Only handle primary button and ignore events originating from pieces
+        // Only handle primary button clicks on the background
         if (event.button !== 0 || !this._isBackgroundTarget(event.target)) return;
         
         event.preventDefault();
@@ -208,10 +241,10 @@ export class JigsawBoard extends HTMLElement {
         const dx = event.clientX - this._panStartX;
         const dy = event.clientY - this._panStartY;
         
-        // Dispatch pan event (will be handled by parent component)
+        // Dispatch pan event for parent to handle
         this.dispatchEvent(createPanEvent(dx, dy));
         
-        // Update pan start positions
+        // Update starting position for next move
         this._panStartX = event.clientX;
         this._panStartY = event.clientY;
     }
@@ -231,7 +264,7 @@ export class JigsawBoard extends HTMLElement {
     }
     
     _onTouchStart(event) {
-        // Ignore touches on pieces
+        // Ignore if touching a piece
         if (!this._isBackgroundTarget(event.target)) return;
         
         event.preventDefault();
@@ -242,21 +275,23 @@ export class JigsawBoard extends HTMLElement {
             this._panStartX = event.touches[0].clientX;
             this._panStartY = event.touches[0].clientY;
         } else if (event.touches.length >= 2) {
-            // Multi-touch - prepare for pinch-zoom
+            // Multi-touch - prepare for pinch zoom
             this._isPanning = false;
-            this._touchCache = Array.from(event.touches).map(t => ({ 
-                id: t.identifier, 
-                x: t.clientX, 
-                y: t.clientY 
+            this._touchCache = Array.from(event.touches).map(t => ({
+                id: t.identifier,
+                x: t.clientX,
+                y: t.clientY
             }));
         }
     }
     
     _onTouchMove(event) {
+        if (!this._isBackgroundTarget(event.target) && !this._isPanning) return;
+        
         event.preventDefault();
         
         if (this._isPanning && event.touches.length === 1) {
-            // Single touch panning
+            // Handle panning
             const dx = event.touches[0].clientX - this._panStartX;
             const dy = event.touches[0].clientY - this._panStartY;
             
@@ -265,7 +300,7 @@ export class JigsawBoard extends HTMLElement {
             this._panStartX = event.touches[0].clientX;
             this._panStartY = event.touches[0].clientY;
         } else if (event.touches.length >= 2 && this._touchCache.length >= 2) {
-            // Multi-touch pinch zoom
+            // Handle pinch zoom
             const touch1 = event.touches[0];
             const touch2 = event.touches[1];
             
@@ -273,50 +308,53 @@ export class JigsawBoard extends HTMLElement {
             const oldTouch2 = this._touchCache.find(t => t.id === touch2.identifier);
             
             if (oldTouch1 && oldTouch2) {
-                // Calculate old and new distances
                 const oldDist = Math.hypot(oldTouch1.x - oldTouch2.x, oldTouch1.y - oldTouch2.y);
                 const newDist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
                 
                 if (oldDist > 0) {
-                    const factor = newDist / oldDist;
+                    const scaleFactor = newDist / oldDist;
                     
-                    // Calculate zoom center
+                    // Calculate center point for zoom
                     const rect = this.getBoundingClientRect();
                     const centerX = (touch1.clientX + touch2.clientX) / 2 - rect.left;
                     const centerY = (touch1.clientY + touch2.clientY) / 2 - rect.top;
                     
-                    this.dispatchEvent(createZoomEvent(factor, centerX, centerY));
+                    this.dispatchEvent(createZoomEvent(scaleFactor, centerX, centerY));
                 }
             }
             
-            // Update touch cache
-            this._touchCache = Array.from(event.touches).map(t => ({ 
-                id: t.identifier, 
-                x: t.clientX, 
-                y: t.clientY 
+            // Update touch cache for next move
+            this._touchCache = Array.from(event.touches).map(t => ({
+                id: t.identifier,
+                x: t.clientX,
+                y: t.clientY
             }));
         }
     }
     
     _onTouchEnd(event) {
+        event.preventDefault();
+        
         if (event.touches.length === 0) {
             // All touches ended
             this._isPanning = false;
             this._touchCache = [];
         } else if (event.touches.length === 1 && this._touchCache.length >= 2) {
-            // Transition from pinch-zoom to pan
+            // Transition from pinch zoom to pan
             this._isPanning = true;
             this._panStartX = event.touches[0].clientX;
             this._panStartY = event.touches[0].clientY;
-            this._touchCache = Array.from(event.touches).map(t => ({ 
-                id: t.identifier, 
-                x: t.clientX, 
-                y: t.clientY 
-            }));
+            this._touchCache = [{
+                id: event.touches[0].identifier,
+                x: event.touches[0].clientX,
+                y: event.touches[0].clientY
+            }];
         }
     }
     
     _onWheel(event) {
+        if (!this._isBackgroundTarget(event.target)) return;
+        
         event.preventDefault();
         
         const scaleFactor = event.deltaY < 0 ? 1.1 : 0.9;
@@ -325,62 +363,6 @@ export class JigsawBoard extends HTMLElement {
         const y = event.clientY - rect.top;
         
         this.dispatchEvent(createZoomEvent(scaleFactor, x, y));
-    }
-    
-    _isBackgroundTarget(target) {
-        // Check if the event target is part of this component's background (not a slotted piece)
-        return target === this || 
-               target === this._container || 
-               target === this._svgGrid || 
-               target === this._gridGroup ||
-               target.closest('#grid-group') === this._gridGroup;
-    }
-    
-    /**
-     * Updates the transformation of the container based on viewport state
-     */
-    _updateTransform() {
-        if (!this._container || !this._viewport) return;
-        
-        this._container.style.transform = this._viewport.getPuzzleAreaTransform();
-    }
-    
-    /**
-     * Apply pan transformation
-     * @param {number} dx - X distance to pan
-     * @param {number} dy - Y distance to pan
-     */
-    pan(dx, dy) {
-        if (!this._viewport) return;
-        
-        this._viewport.pan(dx, dy);
-        this._updateTransform();
-    }
-    
-    /**
-     * Apply zoom transformation
-     * @param {number} factor - Zoom factor
-     * @param {number} x - Center X coordinate
-     * @param {number} y - Center Y coordinate
-     */
-    zoom(factor, x, y) {
-        if (!this._viewport) return;
-        
-        this._viewport.zoom(factor, x, y);
-        this._updateTransform();
-    }
-    
-    /**
-     * Sets the viewBox of the SVG to fit the puzzle board
-     * @param {number} minX - Minimum X coordinate
-     * @param {number} minY - Minimum Y coordinate 
-     * @param {number} width - Width of the board
-     * @param {number} height - Height of the board
-     */
-    setViewBox(minX, minY, width, height) {
-        if (!this._svgGrid) return;
-        
-        this._svgGrid.setAttribute('viewBox', `${minX} ${minY} ${width} ${height}`);
     }
 }
 
