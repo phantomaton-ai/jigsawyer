@@ -1,64 +1,106 @@
-// jigsaw-piece.js - View class for a puzzle piece SVG element.
+// jigsaw-piece.js - Web component for a single puzzle piece visualization.
 
-import { Piece } from './piece.js';
-import { ImageInfo } from './image-info.js';
-
-export class JigsawPiece {
-    constructor(pieceData, svgDefs, imageInfo) {
-        this._pieceData = pieceData;
-        this._svgDefs = svgDefs;
-        this._imageInfo = imageInfo;
-
-        this.element = this._createSvgElement();
-        this._createClipPath();
-        this._applyFill();
-        this.updatePositionAndRotation();
+export class JigsawPiece extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
     }
 
-    _createSvgElement() {
-        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        g.setAttribute('data-id', this._pieceData.id);
-
-        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        rect.setAttribute('x', 0);
-        rect.setAttribute('y', 0);
-        rect.setAttribute('width', this._pieceData.width);
-        rect.setAttribute('height', this._pieceData.height);
-        rect.setAttribute('stroke', 'black');
-        rect.setAttribute('stroke-width', 1);
-        rect.setAttribute('vector-effect', 'non-scaling-stroke');
-
-        g.appendChild(rect);
-        return g;
+    static get observedAttributes() {
+        return [
+            'width', 'height',      // Piece dimensions in world units
+            'x', 'y',              // Current position (top-left) in world units
+            'rotation',            // Current rotation in degrees
+            'image-url',           // URL of the source image
+            'image-width', 'image-height', // Source image dimensions
+            'correct-x', 'correct-y',    // Piece's origin in source image
+            'path-data'            // SVG path 'd' string in local 0,0 coords
+        ];
     }
 
-    _createClipPath() {
-        const clipId = `clip-${this._pieceData.id}`;
-        const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
-        clipPath.setAttribute('id', clipId);
-
-        const clipRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        clipRect.setAttribute('x', this._pieceData.originX);
-        clipRect.setAttribute('y', this._pieceData.originY);
-        clipRect.setAttribute('width', this._pieceData.width);
-        clipRect.setAttribute('height', this._pieceData.height);
-
-        clipPath.appendChild(clipRect);
-        this._svgDefs.appendChild(clipPath);
-
-        this.element.querySelector('rect').setAttribute('clip-path', `url(#${clipId})`);
+    attributeChangedCallback(name, oldValue, newValue) {
+        if (oldValue === newValue) return;
+        this._updateRendering();
     }
 
-    _applyFill() {
-        this.element.querySelector('rect').setAttribute('fill', 'url(#img-pattern)');
+    connectedCallback() {
+        this.shadowRoot.innerHTML = `
+            <style>
+                :host {
+                    display: block;
+                    position: absolute;
+                    touch-action: none;
+                    user-select: none;
+                    /* size, position, and transform set by JS */
+                }
+                svg {
+                    width: 100%; height: 100%;
+                    overflow: visible;
+                }
+                #img-pattern { patternUnits: userSpaceOnUse; }
+                .piece-shape { stroke: black; stroke-width: 1; vector-effect: non-scaling-stroke; }
+            </style>
+            <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+                <defs>
+                    <pattern id="img-pattern"><image id="img-in-pattern"></image></pattern>
+                    <clipPath id="piece-clip"><path id="piece-clip-path"></path></clipPath>
+                </defs>
+                <path class="piece-shape" fill="url(#img-pattern)" clip-path="url(#piece-clip)"></path>
+            </svg>
+        `;
+        this._updateRendering();
     }
 
-    updatePositionAndRotation() {
-        const { currentX, currentY, width, height, rotation } = this._pieceData;
-        // Apply translate and rotate around piece center to the group
-        this.element.setAttribute(
-            'transform',
-            `translate(${currentX}, ${currentY}) rotate(${rotation} ${width / 2} ${height / 2})`
-        );
+    _updateRendering() {
+        const width = parseFloat(this.getAttribute('width') || 0);
+        const height = parseFloat(this.getAttribute('height') || 0);
+        const x = parseFloat(this.getAttribute('x') || 0);
+        const y = parseFloat(this.getAttribute('y') || 0);
+        const rotation = parseFloat(this.getAttribute('rotation') || 0);
+        const imageUrl = this.getAttribute('image-url') || '';
+        const imageWidth = parseFloat(this.getAttribute('image-width') || 0);
+        const imageHeight = parseFloat(this.getAttribute('image-height') || 0);
+        const correctX = parseFloat(this.getAttribute('correct-x') || 0);
+        const correctY = parseFloat(this.getAttribute('correct-y') || 0);
+        let pathData = this.getAttribute('path-data');
+
+        // Update host element position and size
+        this.style.left = `${x}px`;
+        this.style.top = `${y}px`;
+        this.style.width = `${width}px`;
+        this.style.height = `${height}px`;
+        this.style.transformOrigin = 'center center';
+        this.style.transform = `rotate(${rotation}deg)`;
+
+        // Update internal SVG
+        const svg = this.shadowRoot.querySelector('svg');
+        const image = this.shadowRoot.querySelector('#img-in-pattern');
+        const pieceClipPath = this.shadowRoot.querySelector('#piece-clip-path');
+        const pieceShape = this.shadowRoot.querySelector('.piece-shape');
+        const pattern = this.shadowRoot.querySelector('#img-pattern');
+
+        if (!svg || !image || !pieceClipPath || !pieceShape || !pattern) return;
+
+        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+        // Update image pattern
+        if (imageUrl && imageWidth > 0 && imageHeight > 0) {
+            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageUrl);
+            image.setAttribute('width', imageWidth);
+            image.setAttribute('height', imageHeight);
+             // Position image within pattern so piece origin (correctX, correctY) maps to local (0,0)
+            image.setAttribute('x', -correctX);
+            image.setAttribute('y', -correctY);
+             // Pattern size should match image size for userSpaceOnUse
+            pattern.setAttribute('width', imageWidth);
+            pattern.setAttribute('height', imageHeight);
+        }
+
+        // Update path data (default to rectangle if missing)
+        if (!pathData) pathData = `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`;
+        pieceClipPath.setAttribute('d', pathData);
+        pieceShape.setAttribute('d', pathData);
     }
 }
+
+customElements.define('jigsaw-piece', JigsawPiece);
