@@ -64,6 +64,6 @@ export class Piece {
 
     get transform() {
         // CSS transform string for the piece element based on its current state
-        return `translate(${this.x}px, ${this.y}px) rotate(${this.rotation}deg)`;
+        return `translate(${this.x}, ${this.y}) rotate(${this.rotation})`;
     }
 }

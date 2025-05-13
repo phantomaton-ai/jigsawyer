@@ -45,3 +45,4 @@ Behavior:
   * Image; the pixel dimensions of the image used in the puzzle
 * Prefer SVG for rendering puzzle pieces and the grid
 * Use shaped edges for every piece, and ensure these match each other.
+
