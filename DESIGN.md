@@ -96,8 +96,8 @@
 
 ## Relationships
 
-* `jigsaw-puzzle` listens for
+* `jigsaw-puzzle` listens for:
   * `pan` and `zoom`, delegating to the `viewport`
-  * `select` and updates `jigsaw-controls` and `jigsaw-piece`
-  * `move` and updates domain model and `jigsaw-piece`
-  * `rotate` and updates domain model and `jigsaw-piece`
+  * `select` and updates `jigsaw-controls` and relevant `jigsaw-piece`
+  * `move` and updates `Piece` domain model and relevant `jigsaw-piece`
+  * `rotate` and updates `Piece` domain model and relevant `jigsaw-piece`
