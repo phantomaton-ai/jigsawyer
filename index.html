@@ -3,42 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="index.css">
     <title>Jigsawyer Puzzle Fun! 🤩🧩</title>
-    <style>
-        body {
-            font-family: 'Comic Sans MS', 'Chalkboard SE', 'Bradley Hand', cursive; /* Perfectly idiotic! */
-            display: flex;
-            flex-direction: column; /* For controls later perhaps! */
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
-            background-color: #333; /* Spooky dark! 👻 */
-            color: #fff;
-            overflow: hidden; /* No pesky scrollbars unless we want them! */
-        }
-        h1 {
-            color: #ff9800; /* Jack-o-lantern orange! 🎃 */
-            text-shadow: 2px 2px #000;
-            margin-bottom: 10px; /* Space between title and puzzle */
-        }
-        jigsaw-puzzle {
-            display: block; /* Web components are inline by default */
-            width: 90vw; /* Make it responsive, take 90% of viewport width */
-            height: 70vh; /* Take 70% of viewport height */
-            max-width: 1344px; /* Don't exceed assumed image width */
-            max-height: 960px; /* Don't exceed assumed image height */
-            border: 3px dashed #ff9800; /* Thematic! */
-            box-shadow: 0 0 20px rgba(255, 152, 0, 0.7); /* Glowing! ✨ */
-            box-sizing: border-box; /* Include border in element's total size */
-        }
-    </style>
 </head>
 <body>
     <h1>Phantomaton's Jigsawyer! 👻🧩🤖</h1>
-    <!-- size="40" as requested for focused debugging -->
     <jigsaw-puzzle src="example.png" size="40"></jigsaw-puzzle>
-    <!-- Controls component is now inside jigsaw-puzzle shadow DOM -->
     <script type="module" src="jigsawyer.js"></script>
 </body>
 </html>
