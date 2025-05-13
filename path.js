@@ -1,206 +1,165 @@
-// path.js - Utility for generating SVG paths for puzzle pieces with curvy edges
+// path.js - Utility for generating SVG paths for puzzle pieces with curved edges.
 
 /**
- * Generates a curved edge path for a puzzle piece
- * @param {number} length - Length of the edge (width or height)
- * @param {boolean} isVertical - Whether this is a vertical edge (true) or horizontal (false)
- * @param {boolean} isReversed - Whether to traverse the edge in reverse direction
- * @param {Object} cut - The Cut object with a sample() method
- * @param {number} pieceX - X position of the piece in the board
- * @param {number} pieceY - Y position of the piece in the board
- * @returns {string} SVG path segment (without the initial M command)
+ * Generates an SVG path segment for a single puzzle piece edge using a Cut.
+ * The path is generated in the edge's local coordinate system (0,0 at the start of the edge).
+ *
+ * @param {number} length - The length of the edge (width or height of the piece).
+ * @param {import('./cut.js').Cut} cut - The Cut object defining the edge's waviness.
+ * @param {boolean} isOutward - Whether the displacement defined by the cut goes 'outward' from the straight edge line.
+ * @returns {string} SVG path string segment (starts implicitly from the current point, ends at (length, 0) or (0, length) depending on orientation).
  */
-export function generateEdgePath(length, isVertical, isReversed, cut, pieceX, pieceY) {
-    // Default values
-    length = length || 100;
-    const numPoints = 10; // Number of points to sample along the edge
-    
-    // Function to sample the cut at position t (0 to 1 along the edge)
-    // If no cut is provided, return a flat edge
-    const sampleCut = (t) => {
-        if (!cut) return 0;
-        
-        try {
-            // Get displacement from the cut
-            // Need to adjust t based on piece position for continuous cuts
-            let adjustedT = t;
-            if (isVertical) {
-                // For vertical edges, t is relative to the piece's top-left
-                // We need to adjust by the piece's Y position in the board
-                adjustedT = (pieceY + t * length) / (pieceY + length);
-            } else {
-                // For horizontal edges, adjust by X position
-                adjustedT = (pieceX + t * length) / (pieceX + length);
-            }
-            
-            return cut.sample(adjustedT) || 0;
-        } catch (e) {
-            console.error("Error sampling cut:", e);
-            return 0;
-        }
-    };
-    
-    // Points array - will hold [x, y] coordinates
+function generateCurvedEdgeSegment(length, cut, isOutward) {
+    const numPoints = 15; // Number of points to sample along the edge
     const points = [];
-    
-    // Generate points along the edge
+    const direction = isOutward ? 1 : -1; // Direction multiplier for displacement
+
     for (let i = 0; i <= numPoints; i++) {
-        let t = i / numPoints; // Position along edge (0 to 1)
+        const t = i / numPoints; // Position along edge (0 to 1)
         
-        // Reverse direction if needed
-        if (isReversed) {
-            t = 1 - t;
-        }
+        // The position along the edge (x for horizontal, y for vertical in the edge's local space)
+        const position = t * length;
         
-        // Sample the cut to get displacement
-        const displacement = sampleCut(t);
+        // Sample the cut. The sample is a displacement *perpendicular* to the straight edge line.
+        // For a Cut defined over the length of one edge, the sample(t) gives displacement at t.
+        const displacement = (cut ? cut.sample(t) : 0) * direction;
         
-        // Calculate actual x,y coordinates based on edge orientation
-        let x, y;
-        if (isVertical) {
-            // For vertical edges:
-            // X is displacement, Y is position along edge
-            x = displacement;
-            y = t * length;
-        } else {
-            // For horizontal edges:
-            // X is position along edge, Y is displacement
-            x = t * length;
-            y = displacement;
-        }
-        
-        points.push([x, y]);
+        // The path segment is generated as if it's a horizontal edge (x, y)
+        // where x is the position along the edge, and y is the displacement.
+        // We'll transform/orient these points later when assembling the full piece path.
+        points.push({ x: position, y: displacement });
     }
-    
-    // Convert points to SVG path commands
-    // (skip the initial M command - caller will provide it)
-    if (points.length === 0) {
-        return isVertical ? `V ${length}` : `H ${length}`;
-    }
-    
-    // Use lineTo for first point (from the starting position)
-    let path = `L ${points[0][0]},${points[0][1]}`;
-    
-    // Use quadratic curves for smoother transitions between points
+
+    // Convert points to SVG path commands using LineTo for simplicity
+    if (points.length === 0) return '';
+
+    let pathSegment = `L ${points[0].x},${points[0].y}`; // Start at the first point
     for (let i = 1; i < points.length; i++) {
-        path += ` L ${points[i][0]},${points[i][1]}`;
+        pathSegment += ` L ${points[i].x},${points[i].y}`;
     }
-    
-    return path;
+
+    return pathSegment;
 }
 
+
 /**
- * Generates a complete SVG path for a puzzle piece with curved edges
- * @param {number} width - Width of the piece
- * @param {number} height - Height of the piece
- * @param {Object} piece - Piece data with position and joints information
- * @returns {string} Complete SVG path string for the piece shape
+ * Generates a complete SVG path 'd' string for a single puzzle piece, including curved edges.
+ * The path is generated in the piece's local coordinate system (0,0 at the top-left corner).
+ *
+ * @param {import('./piece.js').Piece} piece - The Piece data model instance.
+ * @returns {string} The SVG path data string for the piece's outline.
  */
-export function generatePiecePath(width, height, piece) {
-    // Default dimensions
-    width = width || 100;
-    height = height || 100;
-    
-    // Extract piece position and joints
-    const pieceX = piece?.origination?.x || 0;
-    const pieceY = piece?.origination?.y || 0;
-    const joints = piece?.joints;
-    
-    // Start path at top-left corner
-    let path = `M 0,0`;
-    
-    // Top edge (left to right)
-    if (joints?.top?.cut) {
-        path += ' ' + generateEdgePath(
-            width,               // length
-            false,               // isVertical (horizontal)
-            false,               // isReversed 
-            joints.top.cut,      // cut object
-            pieceX,              // piece X position
-            pieceY               // piece Y position
-        );
-    } else {
-        path += ` H ${width}`;   // Straight line if no cut
+export function generatePiecePath(piece) {
+    if (!piece) {
+        console.error("Cannot generate piece path, piece data is null.");
+        return ""; // Return empty path
     }
-    
-    // Right edge (top to bottom)
-    if (joints?.right?.cut) {
-        // Need to convert the right edge path:
-        // 1. Start point is now (width, 0)
-        // 2. Horizontal displacements now go right from the edge
-        const rightPath = generateEdgePath(
-            height,               // length
-            true,                 // isVertical
-            false,                // isReversed
-            joints.right.cut,     // cut object
-            pieceX + width,       // right edge X position
-            pieceY                // piece Y position
-        );
-        
-        // The rightPath starts at current point (width, 0) already
-        // We need to transform x coordinates: x -> width + x
-        const transformedPath = rightPath.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g, 
-                               (match, x, y) => `L ${Number(width) + Number(x)},${y}`);
-        
-        path += ' ' + transformedPath;
+
+    const width = piece.width;
+    const height = piece.height;
+    const joints = piece.joints;
+
+    // Start path at the top-left corner of the piece's local coordinate system
+    let path = 'M 0,0 ';
+
+    // 1. Top Edge (from 0,0 to width,0)
+    // This is a horizontal edge. The displacement from the cut is along the Y axis.
+    // The path goes from (0,0) to (width,0) in the base rectangle.
+    // If there's a top joint with a cut:
+    const topJoint = joints?.top;
+    if (topJoint?.cut) {
+        // Generate segment in its local coord (0,0 to width, displacement along y)
+        const segment = generateCurvedEdgeSegment(width, topJoint.cut, topJoint.outward);
+        // The segment starts implicitly at (0,0) relative to the M 0,0
+        path += segment + ' ';
     } else {
-        path += ` V ${height}`;   // Straight line if no cut
+        // Straight line if no joint or no cut
+        path += `L ${width},0 `;
     }
-    
-    // Bottom edge (right to left)
-    if (joints?.bottom?.cut) {
-        // Need to convert the bottom edge path:
-        // 1. Start point is now (width, height)
-        // 2. Move right to left (reverse)
-        // 3. Y displacements go down from the bottom edge
-        const bottomPath = generateEdgePath(
-            width,                // length
-            false,                // isVertical (horizontal)
-            true,                 // isReversed (right to left)
-            joints.bottom.cut,    // cut object
-            pieceX,               // piece X position 
-            pieceY + height       // bottom edge Y position
-        );
-        
-        // Transform: 
-        // 1. x -> width - x (for reverse direction)
-        // 2. y -> height + y (for downward displacement)
-        const transformedPath = bottomPath.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g, 
-                              (match, x, y) => `L ${width - Number(x)},${Number(height) + Number(y)}`);
-        
-        path += ' ' + transformedPath;
+
+    // 2. Right Edge (from width,0 to width,height)
+    // This is a vertical edge. The displacement from the cut is along the X axis.
+    // The base rectangle path goes from (width,0) to (width,height).
+    const rightJoint = joints?.right;
+    if (rightJoint?.cut) {
+        // Generate segment in its local coord (0,0 to height, displacement along x)
+        const segment = generateCurvedEdgeSegment(height, rightJoint.cut, rightJoint.outward);
+        // This segment needs to be translated and rotated to align with the right edge.
+        // It should start at (width, 0) and end at (width, height).
+        // A point (x_local, y_local) in the segment (where x_local is displacement, y_local is position along edge)
+        // corresponds to a point (width + x_local, y_local) in the piece's coordinate system.
+         const transformedSegment = segment.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g,
+             (match, x_local_str, y_local_str) => {
+                 const x_local = parseFloat(x_local_str); // Displacement along X (local to segment)
+                 const y_local = parseFloat(y_local_str); // Position along Y (local to segment)
+                 // For a vertical edge (originally generated as horizontal (pos, disp)):
+                 // x_world = width + displacement * direction (displacement is x_local here)
+                 // y_world = position along edge (y_local here)
+                 return `L ${width + x_local},${y_local}`;
+             }
+         );
+        path += transformedSegment + ' ';
     } else {
-        path += ` H 0`;           // Straight line if no cut
+        // Straight line
+        path += `L ${width},${height} `;
     }
-    
-    // Left edge (bottom to top)
-    if (joints?.left?.cut) {
-        // Need to convert the left edge path:
-        // 1. Start point is now (0, height)
-        // 2. Move bottom to top (reverse)
-        // 3. X displacements go left from the edge
-        const leftPath = generateEdgePath(
-            height,               // length
-            true,                 // isVertical
-            true,                 // isReversed (bottom to top)
-            joints.left.cut,      // cut object
-            pieceX,               // left edge X position
-            pieceY                // piece Y position
+
+    // 3. Bottom Edge (from width,height to 0,height)
+    // This is a horizontal edge, traversed from right to left. Displacement is along Y.
+    // The base rectangle path goes from (width,height) to (0,height).
+    const bottomJoint = joints?.bottom;
+    if (bottomJoint?.cut) {
+        // Generate segment in its local coord (0,0 to width, displacement along y)
+        const segment = generateCurvedEdgeSegment(width, bottomJoint.cut, bottomJoint.outward);
+        // This segment needs to be translated and flipped horizontally to align.
+        // It starts implicitly at (width, height) and ends at (0, height).
+        // A point (x_local, y_local) in the segment (where x_local is position, y_local is displacement)
+        // corresponds to a point (width - x_local, height + y_local) in the piece's coordinate system.
+        const transformedSegment = segment.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g,
+             (match, x_local_str, y_local_str) => {
+                 const x_local = parseFloat(x_local_str); // Position along X (local to segment)
+                 const y_local = parseFloat(y_local_str); // Displacement along Y (local to segment)
+                 // For a horizontal edge traversed reverse (originally generated as (pos, disp)):
+                 // x_world = width - position (x_local here)
+                 // y_world = height + displacement * direction (y_local here)
+                 return `L ${width - x_local},${height + y_local}`;
+             }
         );
-        
-        // Transform:
-        // 1. y -> height - y (for reverse direction)
-        // 2. x -> x (x is already negative displacement from left edge)
-        const transformedPath = leftPath.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g, 
-                             (match, x, y) => `L ${Number(x)},${Number(height) - Number(y)}`);
-        
-        path += ' ' + transformedPath;
+        path += transformedSegment + ' ';
     } else {
-        path += ` V 0`;           // Straight line if no cut
+        // Straight line
+        path += `L 0,${height} `;
     }
-    
-    // Close the path
-    path += ' Z';
-    
+
+    // 4. Left Edge (from 0,height to 0,0)
+    // This is a vertical edge, traversed from bottom to top. Displacement is along X.
+    // The base rectangle path goes from (0,height) to (0,0).
+    const leftJoint = joints?.left;
+    if (leftJoint?.cut) {
+        // Generate segment in its local coord (0,0 to height, displacement along x)
+        const segment = generateCurvedEdgeSegment(height, leftJoint.cut, leftJoint.outward);
+        // This segment needs to be translated and flipped vertically to align.
+        // It starts implicitly at (0, height) and ends at (0, 0).
+        // A point (x_local, y_local) in the segment (where x_local is displacement, y_local is position)
+        // corresponds to a point (x_local, height - y_local) in the piece's coordinate system.
+         const transformedSegment = segment.replace(/L (\d+\.?\d*),(\d+\.?\d*)/g,
+             (match, x_local_str, y_local_str) => {
+                 const x_local = parseFloat(x_local_str); // Displacement along X (local to segment)
+                 const y_local = parseFloat(y_local_str); // Position along Y (local to segment)
+                 // For a vertical edge traversed reverse (originally generated as horizontal (disp, pos)):
+                 // x_world = displacement * direction (x_local here)
+                 // y_world = height - position (y_local here)
+                 return `L ${x_local},${height - y_local}`;
+             }
+         );
+        path += transformedSegment + ' ';
+    } else {
+        // Straight line
+        path += `L 0,0 `; // Ends at 0,0
+    }
+
+    // Close the path (redundant if last segment ends at 0,0, but good practice)
+    path += 'Z';
+
     return path;
 }
