@@ -3,12 +3,15 @@
 import { createSelectEvent } from './select.js';
 import { createMoveEvent } from './move.js';
 import { createPlaceEvent } from './place.js';
+import { createRotateEvent } from './rotate.js';
 
 export class JigsawPiece extends HTMLElement {
     constructor() {
         super();
         this.attachShadow({ mode: 'open' });
         this._isDragging = false;
+        this._pointerDownTimer = null; // For tap/double-tap detection
+        this._lastPointerDownTime = 0;
     }
 
     static get observedAttributes() {
@@ -16,7 +19,7 @@ export class JigsawPiece extends HTMLElement {
             'width', 'height', 'x', 'y', 'rotation',
             'image-url', 'image-width', 'image-height',
             'correct-x', 'correct-y', 'path-data',
-            'selected' // Add selected attribute for visual feedback
+            'selected'
         ];
     }
 
@@ -34,14 +37,12 @@ export class JigsawPiece extends HTMLElement {
                     transition: transform 0.1s ease-out, left 0.1s ease-out, top 0.1s ease-out;
                 }
                 svg { width: 100%; height: 100%; overflow: visible; }
-                /* Corrected: Added patternUnits attribute here */
                 #img-pattern { patternUnits: userSpaceOnUse; }
                 .piece-shape { stroke: black; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: grab; }
                 :host([selected]) .piece-shape { stroke: gold; stroke-width: 2; cursor: grabbing; }
             </style>
             <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
                 <defs>
-                    <!-- Corrected: Added patternUnits="userSpaceOnUse" -->
                     <pattern id="img-pattern" patternUnits="userSpaceOnUse"><image id="img-in-pattern"></image></pattern>
                     <clipPath id="piece-clip"><path id="piece-clip-path"></path></clipPath>
                 </defs>
@@ -50,7 +51,7 @@ export class JigsawPiece extends HTMLElement {
         `;
         this._updateRendering();
         this._addEventListeners();
-        this._updateSelectedState(); // Apply initial selected state
+        this._updateSelectedState();
     }
 
     _updateRendering() {
@@ -98,16 +99,18 @@ export class JigsawPiece extends HTMLElement {
     _updateSelectedState() {
          const shape = this.shadowRoot.querySelector('.piece-shape');
          if (shape) {
-             // Use toggle based on attribute presence
              shape.classList.toggle('selected', this.hasAttribute('selected'));
          }
-         // Basic z-index for selected piece (more robust z-ordering might be needed)
          if (this.hasAttribute('selected')) this.style.zIndex = '1'; else this.style.zIndex = '';
     }
 
     _addEventListeners() {
         this.addEventListener('mousedown', this._onPointerDown.bind(this));
         this.addEventListener('touchstart', this._onPointerDown.bind(this), { passive: false });
+         // Add double-click listener
+        this.addEventListener('dblclick', this._onDoubleClick.bind(this));
+         // Handle double-tap on touch devices (dblclick often doesn't fire reliably)
+         // Single touchstart/touchend pairs will be used to detect double-tap manually
     }
 
     _onPointerDown(event) {
@@ -118,10 +121,39 @@ export class JigsawPiece extends HTMLElement {
         const clientY = event.clientY || event.touches[0].clientY;
         const pieceId = parseInt(this.getAttribute('piece-id'), 10);
 
+        // --- Double-tap detection for touch devices ---
+        if (event.type === 'touchstart') {
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - this._lastPointerDownTime;
+            const DOUBLE_TAP_THRESHOLD = 300; // ms
+
+            if (tapLength < DOUBLE_TAP_THRESHOLD && tapLength > 0) {
+                // This looks like the second tap of a double-tap
+                console.log(`Piece ${pieceId}: Double-tap detected.`);
+                // Dispatch rotate event
+                this.dispatchEvent(createRotateEvent(pieceId, 1)); // 1 counter-clockwise turn
+                this._lastPointerDownTime = 0; // Reset timer
+                // Prevent drag from starting after double-tap
+                return;
+            } else {
+                // First tap, start timer
+                this._lastPointerDownTime = currentTime;
+                 // Clear any previous pending timer
+                 if (this._pointerDownTimer) clearTimeout(this._pointerDownTimer);
+                 // Set a timer to clear _lastPointerDownTime if no second tap comes soon
+                 this._pointerDownTimer = setTimeout(() => {
+                     this._lastPointerDownTime = 0;
+                     this._pointerDownTimer = null;
+                 }, DOUBLE_TAP_THRESHOLD);
+            }
+        }
+        // --- End Double-tap detection ---
+
+
+        // If not handling as double-tap, dispatch select event and start drag
         this.dispatchEvent(createSelectEvent(pieceId, clientX, clientY));
 
         this._isDragging = true;
-        // Use bound methods to correctly remove listeners later
         this._onPointerMoveBound = this._onPointerMove.bind(this);
         this._onPointerUpBound = this._onPointerUp.bind(this);
         window.addEventListener('mousemove', this._onPointerMoveBound);
@@ -130,6 +162,16 @@ export class JigsawPiece extends HTMLElement {
         window.addEventListener('touchend', this._onPointerUpBound, { passive: false });
         window.addEventListener('touchcancel', this._onPointerUpBound, { passive: false });
     }
+
+     // Handle standard dblclick event for mouse
+    _onDoubleClick(event) {
+        event.preventDefault(); event.stopPropagation();
+        const pieceId = parseInt(this.getAttribute('piece-id'), 10);
+        console.log(`Piece ${pieceId}: Double-click detected.`);
+        // Dispatch rotate event
+        this.dispatchEvent(createRotateEvent(pieceId, 1)); // 1 counter-clockwise turn
+    }
+
 
     _onPointerMove(event) {
         if (!this._isDragging) return;
@@ -156,6 +198,13 @@ export class JigsawPiece extends HTMLElement {
 
         const pieceId = parseInt(this.getAttribute('piece-id'), 10);
         this.dispatchEvent(createPlaceEvent(pieceId));
+
+         // If a timer was started for double-tap, clear it as the drag/up sequence cancelled the tap
+         if (this._pointerDownTimer) {
+            clearTimeout(this._pointerDownTimer);
+            this._pointerDownTimer = null;
+            this._lastPointerDownTime = 0; // Reset tap state
+         }
     }
 }
 
