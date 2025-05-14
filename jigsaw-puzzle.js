@@ -1,5 +1,5 @@
 // jigsaw-puzzle.js - Main custom element (<jigsaw-puzzle>) to display square pieces.
-// Orchestrates piece data generation and adds jigsaw-piece web components to the DOM.
+// Manages scaling and positions pieces within a scaled container.
 
 import { ImageInfo } from './image-info.js';
 import { Piece } from './piece.js';
@@ -7,15 +7,15 @@ import { JigsawPiece } from './jigsaw-piece.js'; // Assume JigsawPiece is the Cu
 
 const DEFAULT_IMAGE_WIDTH = 1344;
 const DEFAULT_IMAGE_HEIGHT = 960;
-const DEFAULT_PIECE_COUNT = 40;
+const DEFAULT_PIECE_COUNT = 40; // As requested
 
 export class JigsawPuzzle extends HTMLElement {
     constructor() {
         super();
         this.attachShadow({ mode: 'open' });
         this._imageInfo = null;
-        this._pieces = []; // Array of Piece domain models
-        this._piecesContainer = null; // Container for piece elements
+        this._pieces = [];
+        this._scaledContainer = null;
     }
 
     static get observedAttributes() { return ['src', 'size']; }
@@ -25,85 +25,125 @@ export class JigsawPuzzle extends HTMLElement {
         if (n === 'size' && this._imageInfo) this._initializePuzzle(this._imageInfo, parseInt(v, 10) || DEFAULT_PIECE_COUNT);
     }
     connectedCallback() {
-        // Create a container for the pieces
-        this.shadowRoot.innerHTML = '<div id="pieces-container" style="position: relative; width: 100%; height: 100%;"></div>';
-        this._piecesContainer = this.shadowRoot.getElementById('pieces-container');
-
-        // Basic styling to make the host element fill its container
-        const style = document.createElement('style');
-        style.textContent = `:host { display: block; width: 100%; height: 100%; overflow: hidden; }`;
-        this.shadowRoot.insertBefore(style, this.shadowRoot.firstChild);
-
+        this.shadowRoot.innerHTML = `
+            <style>
+                :host { display: block; position: relative; width: 100%; height: 100%; overflow: hidden; background-color: #1a1a1a; }
+                #scaled-container { position: absolute; transform-origin: 0 0; }
+                jigsaw-piece { position: absolute; }
+            </style>
+            <div id="scaled-container"></div>
+        `;
+        this._scaledContainer = this.shadowRoot.getElementById('scaled-container');
+        this._resizeObserver = new ResizeObserver(() => this._updateScale());
+        this._resizeObserver.observe(this);
 
         const src = this.getAttribute('src');
         if (src) this._loadImage(src);
         else this._initializePuzzle(new ImageInfo("placeholder", DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT), parseInt(this.getAttribute('size'), 10) || DEFAULT_PIECE_COUNT);
     }
 
+    disconnectedCallback() {
+        if (this._resizeObserver) this._resizeObserver.disconnect();
+    }
+
     _loadImage(src) {
         const img = new Image();
-        img.onload = () => this._initializePuzzle(new ImageInfo(src, img.width, img.height), parseInt(this.getAttribute('size'), 10) || DEFAULT_PIECE_COUNT);
+        img.onload = () => {
+            this._imageInfo = new ImageInfo(src, img.width, img.height);
+            this._initializePuzzle(this._imageInfo, parseInt(this.getAttribute('size'), 10) || DEFAULT_PIECE_COUNT);
+            this._updateScale();
+        };
         img.onerror = () => {
             console.error(`Failed to load image: ${src}`);
-            this._initializePuzzle(new ImageInfo("error", DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT), parseInt(this.getAttribute('size'), 10) || DEFAULT_PIECE_COUNT);
+            this._imageInfo = new ImageInfo("error", DEFAULT_IMAGE_WIDTH, DEFAULT_IMAGE_HEIGHT);
+            this._initializePuzzle(this._imageInfo, parseInt(this.getAttribute('size'), 10) || DEFAULT_PIECE_COUNT);
+            this._updateScale();
         };
         img.src = src;
     }
 
     _initializePuzzle(imageInfo, pieceCount) {
-        if (!imageInfo || pieceCount <= 0 || !this._piecesContainer) return;
+        if (!imageInfo || pieceCount <= 0 || !this._scaledContainer) return;
 
-        // Determine grid size aiming for square pieces relative to image aspect ratio
-        const pieceAspectRatio = imageInfo.width / imageInfo.height;
-        const cols = Math.round(Math.sqrt(pieceCount * pieceAspectRatio));
-        const rows = Math.round(pieceCount / cols);
+        const pA = (imageInfo.width * imageInfo.height) / pieceCount;
+        const pDim = Math.sqrt(pA); // Ideal square piece size
+        const pSize = Math.min(imageInfo.width, imageInfo.height) / Math.sqrt(pieceCount);
+        const cols = Math.round(imageInfo.width / pSize);
+        const rows = Math.round(imageInfo.height / pSize);
         const pW = imageInfo.width / cols; // Actual piece width in image pixels
         const pH = imageInfo.height / rows; // Actual piece height in image pixels
 
-        // Define a scatter area larger than the puzzle itself in image pixels
-        const sF = 2; // Scatter factor
+        const sF = 2; // Scatter factor for board area
         const sW = imageInfo.width * sF;
         const sH = imageInfo.height * sF;
-        const sOX = -imageInfo.width * (sF - 1) / 2; // Offset to center the original image area
-        const sOY = -imageInfo.height * (sF - 1) / 2;
+        const sOX = -imageInfo.width * (sF - 1) / 2; // Scatter area origin X
+        const sOY = -imageInfo.height * (sF - 1) / 2; // Scatter area origin Y
+
+        // Set the size of the scaled container to match the full board/scatter area
+        this._scaledContainer.style.width = `${sW}px`;
+        this._scaledContainer.style.height = `${sH}px`;
+        // Position the container at (0,0) relative to the host initially
+        this._scaledContainer.style.left = '0';
+        this._scaledContainer.style.top = '0';
 
         this._pieces = [];
-        this._piecesContainer.innerHTML = ''; // Clear existing piece elements
+        this._scaledContainer.innerHTML = ''; // Clear existing pieces
 
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
                 const id = r * cols + c;
                 const oX = c * pW; const oY = r * pH;
                 const pieceData = new Piece(id, oX, oY, pW, pH);
-                // Randomize placement within the scatter area (using image pixel coordinates)
-                pieceData.randomizePlacement(sW, sH, sOX, sOY);
-                this._pieces.push(pieceData);
+                pieceData.randomizePlacement(sW, sH, sOX, sOY); // Randomize within scatter area
 
-                // Create the jigsaw-piece custom element
                 const pieceEl = document.createElement('jigsaw-piece');
-                // Pass piece data as attributes (in image pixel coordinates)
                 pieceEl.setAttribute('width', pieceData.width);
                 pieceEl.setAttribute('height', pieceData.height);
                 pieceEl.setAttribute('x', pieceData.currentX);
                 pieceEl.setAttribute('y', pieceData.currentY);
-                pieceEl.setAttribute('rotation', pieceData.rotation); // Degrees
+                pieceEl.setAttribute('rotation', pieceData.rotation);
                 pieceEl.setAttribute('image-url', imageInfo.url);
                 pieceEl.setAttribute('image-width', imageInfo.width);
                 pieceEl.setAttribute('image-height', imageInfo.height);
                 pieceEl.setAttribute('correct-x', pieceData.originX);
                 pieceEl.setAttribute('correct-y', pieceData.originY);
-                // Simple square path data (local to the piece's SVG 0,0)
-                pieceEl.setAttribute('path-data', `M 0 0 L ${pW} 0 L ${pW} ${pH} L 0 ${pH} Z`);
+                pieceEl.setAttribute('path-data', `M 0 0 L ${pW} 0 L ${pW} ${pH} L 0 ${pH} Z`); // Square path
 
-
-                // Append the custom element to the pieces container div
-                this._piecesContainer.appendChild(pieceEl);
+                this._scaledContainer.appendChild(pieceEl);
+                this._pieces.push(pieceData); // Store data model
             }
         }
-        // Note: Viewport/Pan/Zoom/Controls/Grid are omitted for simplicity as requested.
-        // The pieces-container div represents the "world" space, and its contents are in image pixels.
-        // The jigsaw-puzzle component's size (set by parent CSS) acts as the initial viewport size.
-        // The piece elements' CSS `left`/`top` will position them within this div.
+        this._updateScale(); // Apply initial scale and centering
+    }
+
+    _updateScale() {
+        if (!this._scaledContainer || !this._imageInfo) return;
+
+        const hostRect = this.getBoundingClientRect();
+        const hostWidth = hostRect.width;
+        const hostHeight = hostRect.height;
+
+        // Dimensions of the scaled container (scatter area in image pixels)
+        const boardWidth = parseFloat(this._scaledContainer.style.width);
+        const boardHeight = parseFloat(this._scaledContainer.style.height);
+
+        if (hostWidth <= 0 || hostHeight <= 0 || boardWidth <= 0 || boardHeight <= 0) return;
+
+        // Calculate scale factor to fit the board area within the host element ('contain')
+        const scaleX = hostWidth / boardWidth;
+        const scaleY = hostHeight / boardHeight;
+        const scale = Math.min(scaleX, scaleY);
+
+        // Calculate translation needed to center the scaled board area within the host.
+        // The scaled board area has size (boardWidth * scale, boardHeight * scale).
+        // It starts at (0,0) relative to the host if left/top are 0.
+        // The translation needed is half the remaining space.
+        const translateX = (hostWidth - boardWidth * scale) / 2;
+        const translateY = (hostHeight - boardHeight * scale) / 2;
+
+        // Apply combined transform: scale then translate.
+        // `translate(tx, ty)` in scaled coordinates is `translate(tx/scale, ty/scale)` in unscaled coordinates.
+        this._scaledContainer.style.transform = `scale(${scale}) translate(${translateX / scale}px, ${translateY / scale}px)`;
     }
 }
 
