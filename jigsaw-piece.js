@@ -1,158 +1,158 @@
 // jigsaw-piece.js - Web component for a single puzzle piece visualization.
 
+import { createSelectEvent } from './select.js';
+import { createMoveEvent } from './move.js';
+import { createPlaceEvent } from './place.js';
+
 export class JigsawPiece extends HTMLElement {
     constructor() {
         super();
         this.attachShadow({ mode: 'open' });
+        this._isDragging = false;
     }
 
     static get observedAttributes() {
         return [
-            'width', 'height',
-            'x', 'y',
-            'rotation',
-            'image-url',
-            'image-width', 'image-height',
-            'correct-x', 'correct-y',
-            'path-data' // For square shape initially
+            'width', 'height', 'x', 'y', 'rotation',
+            'image-url', 'image-width', 'image-height',
+            'correct-x', 'correct-y', 'path-data',
+            'selected' // Add selected attribute for visual feedback
         ];
     }
 
     attributeChangedCallback(name, oldValue, newValue) {
-        if (oldValue === newValue && name !== 'selected' && name !== 'snapped') return;
-        // Only call _updateRendering if essential attributes change for display
-        // Or just call it every time for simplicity at this stage.
+        if (oldValue === newValue && name !== 'selected') return;
         this._updateRendering();
+        if (name === 'selected') this._updateSelectedState();
     }
 
     connectedCallback() {
         this.shadowRoot.innerHTML = `
             <style>
                 :host {
-                    display: block;
-                    position: absolute;
-                    touch-action: none;
-                    user-select: none;
-                    /* size, position, and transform set by JS based on attributes */
+                    display: block; position: absolute; touch-action: none; user-select: none;
+                    transition: transform 0.1s ease-out, left 0.1s ease-out, top 0.1s ease-out;
                 }
-                svg {
-                    width: 100%; height: 100%;
-                    overflow: visible;
-                }
-                /* Pattern units should be userSpaceOnUse, set in attribute */
-                .piece-shape { stroke: black; stroke-width: 1; vector-effect: non-scaling-stroke; }
+                svg { width: 100%; height: 100%; overflow: visible; }
+                #img-pattern { patternUnits: userSpaceOnUse; }
+                .piece-shape { stroke: black; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: grab; }
+                :host([selected]) .piece-shape { stroke: gold; stroke-width: 2; cursor: grabbing; }
             </style>
             <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
                 <defs>
-                    <!-- Pattern for the entire source image -->
-                    <pattern id="img-pattern" patternUnits="userSpaceOnUse">
-                        <!-- Image element within the pattern -->
-                        <image id="img-in-pattern"></image>
-                    </pattern>
-                    <!-- Clip path for the piece shape -->
+                    <pattern id="img-pattern"><image id="img-in-pattern"></image></pattern>
                     <clipPath id="piece-clip"><path id="piece-clip-path"></path></clipPath>
                 </defs>
-                <!-- The shape element, filled with the pattern and clipped -->
                 <path class="piece-shape" fill="url(#img-pattern)" clip-path="url(#piece-clip)"></path>
             </svg>
         `;
-        // Call update rendering after shadow DOM is populated
         this._updateRendering();
+        this._addEventListeners();
+        this._updateSelectedState(); // Apply initial selected state
     }
 
     _updateRendering() {
-        // Read attributes
-        const width = parseFloat(this.getAttribute('width') || 0);
-        const height = parseFloat(this.getAttribute('height') || 0);
+        const w = parseFloat(this.getAttribute('width') || 0);
+        const h = parseFloat(this.getAttribute('height') || 0);
         const x = parseFloat(this.getAttribute('x') || 0);
         const y = parseFloat(this.getAttribute('y') || 0);
-        const rotation = parseFloat(this.getAttribute('rotation') || 0);
-        const imageUrl = this.getAttribute('image-url') || '';
-        const imageWidth = parseFloat(this.getAttribute('image-width') || 0);
-        const imageHeight = parseFloat(this.getAttribute('image-height') || 0);
-        const correctX = parseFloat(this.getAttribute('correct-x') || 0);
-        const correctY = parseFloat(this.getAttribute('correct-y') || 0);
-        let pathData = this.getAttribute('path-data');
+        const rot = parseFloat(this.getAttribute('rotation') || 0);
+        const url = this.getAttribute('image-url') || '';
+        const imgW = parseFloat(this.getAttribute('image-width') || 0);
+        const imgH = parseFloat(this.getAttribute('image-height') || 0);
+        const corrX = parseFloat(this.getAttribute('correct-x') || 0);
+        const corrY = parseFloat(this.getAttribute('correct-y') || 0);
+        let path = this.getAttribute('path-data');
 
-        // --- Debugging Logs ---
-        // console.log(`Piece ${this.id || 'N/A'}: Updating rendering.`);
-        // console.log(`  Size: ${width}x${height}, Pos: (${x}, ${y}), Rot: ${rotation}`);
-        // console.log(`  Image: ${imageUrl} (${imageWidth}x${imageHeight}) @ (${correctX}, ${correctY})`);
-        // console.log(`  Path Data Length: ${pathData ? pathData.length : 0}`);
-
-
-        // Update host element position and size (CSS)
         this.style.left = `${x}px`;
         this.style.top = `${y}px`;
-        this.style.width = `${width}px`;
-        this.style.height = `${height}px`;
-        this.style.transformOrigin = 'center center'; // Rotate around the element's visual center
-        this.style.transform = `rotate(${rotation}deg)`;
+        this.style.width = `${w}px`;
+        this.style.height = `${h}px`;
+        this.style.transformOrigin = 'center center';
+        this.style.transform = `rotate(${rot}deg)`;
 
-        // Update internal SVG
         const svg = this.shadowRoot.querySelector('svg');
-        const image = this.shadowRoot.querySelector('#img-in-pattern');
-        const pieceClipPath = this.shadowRoot.querySelector('#piece-clip-path');
-        const pieceShape = this.shadowRoot.querySelector('.piece-shape');
+        const img = this.shadowRoot.querySelector('#img-in-pattern');
+        const clipPath = this.shadowRoot.querySelector('#piece-clip-path');
+        const shape = this.shadowRoot.querySelector('.piece-shape');
         const pattern = this.shadowRoot.querySelector('#img-pattern');
 
-        if (!svg || !image || !pieceClipPath || !pieceShape || !pattern) {
-            console.error("JigsawPiece internal SVG elements not found!");
-            return;
-        }
+        if (!svg || !img || !clipPath || !shape || !pattern) return;
 
-        // Set SVG viewBox to match piece dimensions (local coordinate system 0,0 to width,height)
-        svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
 
-        // Configure image pattern and the image element inside it
-        if (imageUrl && imageWidth > 0 && imageHeight > 0) {
-            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageUrl);
-            image.setAttribute('width', imageWidth);
-            image.setAttribute('height', imageHeight);
-            // Position the image *within the pattern*. The pattern uses userSpaceOnUse,
-            // so its coordinate system is the same as the SVG viewport it's applied to.
-            // The piece's local SVG viewport is 0,0 to width,height.
-            // The piece's origin in the source image is (correctX, correctY).
-            // To make the point (correctX, correctY) from the source image appear at the piece's local (0,0),
-            // we must shift the image element within the pattern by (-correctX, -correctY).
-            image.setAttribute('x', -correctX);
-            image.setAttribute('y', -correctY);
+        if (url && imgW > 0 && imgH > 0) {
+            img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', url);
+            img.setAttribute('width', imgW); img.setAttribute('height', imgH);
+            img.setAttribute('x', -corrX); img.setAttribute('y', -corrY);
+            pattern.setAttribute('width', imgW); pattern.setAttribute('height', imgH);
+        } else { img.removeAttributeNS('http://www.w3.org/1999/xlink', 'href'); }
 
-            // The pattern's size defines the bounds of the pattern tile. When patternUnits="userSpaceOnUse",
-            // the pattern tile stretches to match the image's defined width and height in the coordinate system
-            // of the element it fills (the piece's local 0,0 to width,height).
-            // Setting pattern width/height to imageWidth/imageHeight seems correct for showing the whole image,
-            // then the piece's shape acts as the window.
-            pattern.setAttribute('width', imageWidth);
-            pattern.setAttribute('height', imageHeight);
+        if (!path || w <= 0 || h <= 0) path = `M 0 0 L ${w} 0 L ${w} ${h} L 0 ${h} Z`;
+        clipPath.setAttribute('d', path);
+        shape.setAttribute('d', path);
+    }
 
-             // console.log(`Piece ${this.id || 'N/A'}: Pattern configured. Image x: ${-correctX}, y: ${-correctY}, pattern size: ${imageWidth}x${imageHeight}`);
+    _updateSelectedState() {
+         const shape = this.shadowRoot.querySelector('.piece-shape');
+         if (shape) {
+             if (this.hasAttribute('selected')) shape.classList.add('selected');
+             else shape.classList.remove('selected');
+         }
+         // Z-index handled by jigsaw-puzzle re-appending the element
+         if (this.hasAttribute('selected')) this.style.zIndex = '1'; else this.style.zIndex = '';
+    }
 
-        } else {
-            // Handle cases with missing image info (e.g., error loading)
-            // Clear the image href to prevent broken image icon if desired.
-            image.removeAttributeNS('http://www.w3.org/1999/xlink', 'href');
-            console.warn(`Piece ${this.id || 'N/A'}: Missing or invalid image info. Cannot configure pattern.`);
-        }
+    _addEventListeners() {
+        this.addEventListener('mousedown', this._onPointerDown.bind(this));
+        this.addEventListener('touchstart', this._onPointerDown.bind(this), { passive: false });
+    }
 
+    _onPointerDown(event) {
+        if ((event.type === 'mousedown' && event.button !== 0) || (event.type === 'touchstart' && event.touches.length > 1)) return;
+        event.preventDefault(); event.stopPropagation();
 
-        // Update clip path data (default to rectangle if missing or size is zero)
-        if (!pathData || width <= 0 || height <= 0) {
-             pathData = `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`;
-             // console.warn(`Piece ${this.id || 'N/A'}: path-data missing or size is zero. Using default rectangle path: ${pathData}`);
-        }
-        pieceClipPath.setAttribute('d', pathData);
-        pieceShape.setAttribute('clip-path', 'url(#piece-clip)'); // Ensure clip path is applied
+        const clientX = event.clientX || event.touches[0].clientX;
+        const clientY = event.clientY || event.touches[0].clientY;
+        const pieceId = parseInt(this.getAttribute('piece-id'), 10);
 
+        this.dispatchEvent(createSelectEvent(pieceId, clientX, clientY));
 
-        // Update piece shape path data
-        // For square pieces, the clip path IS the shape path, but we need the path data on the shape element too for stroke.
-        pieceShape.setAttribute('d', pathData);
+        this._isDragging = true;
+        this._onPointerMoveBound = this._onPointerMove.bind(this);
+        this._onPointerUpBound = this._onPointerUp.bind(this);
+        window.addEventListener('mousemove', this._onPointerMoveBound);
+        window.addEventListener('mouseup', this._onPointerUpBound);
+        window.addEventListener('touchmove', this._onPointerMoveBound, { passive: false });
+        window.addEventListener('touchend', this._onPointerUpBound, { passive: false });
+        window.addEventListener('touchcancel', this._onPointerUpBound, { passive: false });
+    }
 
-        // Set fill to reference the internal pattern
-        pieceShape.setAttribute('fill', 'url(#img-pattern)');
+    _onPointerMove(event) {
+        if (!this._isDragging) return;
+        event.preventDefault();
 
-         // console.log(`Piece ${this.id || 'N/A'}: Rendering updated.`);
+        const pointer = event.touches ? event.touches[0] : event;
+        const clientX = pointer.clientX;
+        const clientY = pointer.clientY;
+        const pieceId = parseInt(this.getAttribute('piece-id'), 10);
+
+        this.dispatchEvent(createMoveEvent(pieceId, clientX, clientY));
+    }
+
+    _onPointerUp(event) {
+        if (!this._isDragging) return;
+        event.preventDefault();
+
+        this._isDragging = false;
+        window.removeEventListener('mousemove', this._onPointerMoveBound);
+        window.removeEventListener('mouseup', this._onPointerUpBound);
+        window.removeEventListener('touchmove', this._onPointerMoveBound);
+        window.removeEventListener('touchend', this._onPointerUpBound);
+        window.removeEventListener('touchcancel', this._onPointerUpBound);
+
+        const pieceId = parseInt(this.getAttribute('piece-id'), 10);
+        this.dispatchEvent(createPlaceEvent(pieceId));
     }
 }
 
