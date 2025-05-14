@@ -1,12 +1,13 @@
 // jigsaw-puzzle.js - Main custom element (<jigsaw-puzzle>).
-// Orchestrates piece data, scaling, and handles drag events.
+// Orchestrates piece data, scaling, and handles drag/rotate events.
 
 import { ImageInfo } from './image-info.js';
-import { Piece } from './piece.js';
+import { Piece } from './piece.js'; // Need Piece data model to store rotation
 import { JigsawPiece } from './jigsaw-piece.js';
 import { createSelectEvent } from './select.js';
 import { createMoveEvent } from './move.js';
 import { createPlaceEvent } from './place.js';
+import { createRotateEvent } from './rotate.js';
 
 const DEFAULT_IMAGE_WIDTH = 1344;
 const DEFAULT_IMAGE_HEIGHT = 960;
@@ -17,9 +18,9 @@ export class JigsawPuzzle extends HTMLElement {
         super();
         this.attachShadow({ mode: 'open' });
         this._imageInfo = null;
-        this._pieces = [];
-        this._container = null; // Renamed from _piecesContainer for brevity
-        this._jigsawPieces = new Map();
+        this._pieces = []; // Array of Piece domain models
+        this._container = null;
+        this._jigsawPieces = new Map(); // Map<pieceId, JigsawPiece HTMLElement>
         this._selectedPieceId = null;
         this._dragOffsetX = 0;
         this._dragOffsetY = 0;
@@ -43,7 +44,7 @@ export class JigsawPuzzle extends HTMLElement {
         this._container = this.shadowRoot.getElementById('container');
         this._resizeObserver = new ResizeObserver(() => this._updateScale());
         this._resizeObserver.observe(this);
-        this._addEventListeners(); // Add event listeners
+        this._addEventListeners();
 
         const src = this.getAttribute('src');
         if (src) this._loadImage(src);
@@ -83,17 +84,17 @@ export class JigsawPuzzle extends HTMLElement {
         this._container.style.width = `${sW}px`;
         this._container.style.height = `${sH}px`;
 
-        this._pieces = [];
+        this._pieces = []; // Clear previous data models
         Array.from(this._container.children).forEach(c => c.remove()); // Clear old pieces
-        this._jigsawPieces = new Map();
+        this._jigsawPieces = new Map(); // Clear map
 
         for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
                 const id = r * cols + c;
-                const oX = c * pW; const oY = r * pH;
+                const oX = c * pW; const oY = r * pH; // Origin in image pixels (world units)
                 const pieceData = new Piece(id, oX, oY, pW, pH);
                 pieceData.randomizePlacement(sW, sH, sOX, sOY);
-                this._pieces.push(pieceData);
+                this._pieces.push(pieceData); // Store data model
 
                 const pieceEl = document.createElement('jigsaw-piece');
                 pieceEl.setAttribute('piece-id', id);
@@ -101,7 +102,7 @@ export class JigsawPuzzle extends HTMLElement {
                 pieceEl.setAttribute('height', pieceData.height);
                 pieceEl.setAttribute('x', pieceData.currentX);
                 pieceEl.setAttribute('y', pieceData.currentY);
-                pieceEl.setAttribute('rotation', pieceData.rotation);
+                pieceEl.setAttribute('rotation', pieceData.rotation); // Store initial rotation
                 pieceEl.setAttribute('image-url', imageInfo.url);
                 pieceEl.setAttribute('image-width', imageInfo.width);
                 pieceEl.setAttribute('image-height', imageInfo.height);
@@ -113,7 +114,7 @@ export class JigsawPuzzle extends HTMLElement {
                 this._jigsawPieces.set(id, pieceEl);
             }
         }
-        this._updateScale(); // Apply initial scale and centering
+        this._updateScale();
     }
 
     _updateScale() {
@@ -139,7 +140,7 @@ export class JigsawPuzzle extends HTMLElement {
         this.addEventListener('select', this._handleSelect.bind(this));
         this.addEventListener('move', this._handleMove.bind(this));
         this.addEventListener('place', this._handlePlace.bind(this));
-        // Listen for clicks on the container background to deselect
+        this.addEventListener('rotate', this._handleRotate.bind(this)); // Listen for rotate event
         this._container.addEventListener('click', this._handleBackgroundClick.bind(this));
     }
 
@@ -147,20 +148,17 @@ export class JigsawPuzzle extends HTMLElement {
     _handleSelect(event) {
         event.stopPropagation();
         const { pieceId, clientX, clientY } = event.detail;
+        const pieceEl = this._jigsawPieces.get(pieceId);
+        if (!pieceEl) return;
 
-        // Deselect previously selected piece
         if (this._selectedPieceId !== null && this._selectedPieceId !== pieceId) {
             const prevEl = this._jigsawPieces.get(this._selectedPieceId);
             if (prevEl) prevEl.removeAttribute('selected');
         }
 
-        // Select the new piece
         this._selectedPieceId = pieceId;
-        const pieceEl = this._jigsawPieces.get(pieceId);
-        if (!pieceEl) return;
-        pieceEl.setAttribute('selected', ''); // Triggers view update
+        pieceEl.setAttribute('selected', '');
 
-        // Calculate drag offset in world coordinates
         const hostRect = this.getBoundingClientRect();
         const containerRect = this._container.getBoundingClientRect();
         const scale = containerRect.width / parseFloat(this._container.style.width);
@@ -181,9 +179,9 @@ export class JigsawPuzzle extends HTMLElement {
         if (this._selectedPieceId !== pieceId) return;
 
         const pieceEl = this._jigsawPieces.get(pieceId);
-        if (!pieceEl || !this._container) return; // Check if container is available
+        if (!pieceEl || !this._container) return;
 
-        const hostRect = this.getBoundingClientRect(); // Use hostRect to get position relative to viewport
+        const hostRect = this.getBoundingClientRect();
         const containerRect = this._container.getBoundingClientRect();
         const scale = containerRect.width / parseFloat(this._container.style.width);
 
@@ -205,8 +203,6 @@ export class JigsawPuzzle extends HTMLElement {
         const { pieceId } = event.detail;
         if (this._selectedPieceId !== pieceId) return;
 
-        // Snapping logic would go here. Omitted for now.
-
         const pieceEl = this._jigsawPieces.get(pieceId);
         if (pieceEl) pieceEl.removeAttribute('selected');
 
@@ -214,9 +210,31 @@ export class JigsawPuzzle extends HTMLElement {
         this._dragOffsetX = 0;
         this._dragOffsetY = 0;
     }
-    
+
+    _handleRotate(event) {
+        event.stopPropagation();
+        const { pieceId, turns } = event.detail;
+
+        // Allow rotation only for the currently selected piece
+        if (this._selectedPieceId !== pieceId || this._selectedPieceId === null) return;
+
+        const pieceEl = this._jigsawPieces.get(pieceId);
+        if (!pieceEl) return;
+
+        // Get current rotation, add turns, normalize
+        let currentRotation = parseFloat(pieceEl.getAttribute('rotation') || 0);
+        let newRotation = currentRotation + (turns * -90); // Counter-clockwise
+
+        // Keep rotation within 0-360 range
+        newRotation = (newRotation % 360 + 360) % 360;
+
+        // Update the rotation attribute on the piece element
+        pieceEl.setAttribute('rotation', newRotation);
+
+        // Note: Snapping on rotation is not implemented yet.
+    }
+
     _handleBackgroundClick(event) {
-        // If click target is the container itself and a piece is selected, deselect.
         if (event.target === this._container && this._selectedPieceId !== null) {
              const pieceEl = this._jigsawPieces.get(this._selectedPieceId);
              if (pieceEl) pieceEl.removeAttribute('selected');
