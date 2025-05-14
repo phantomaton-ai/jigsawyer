@@ -214,10 +214,6 @@ export class JigsawPuzzle extends HTMLElement {
     _handleRotate(event) {
         event.stopPropagation();
         const { pieceId, turns } = event.detail;
-
-        // Allow rotation only for the currently selected piece
-        if (this._selectedPieceId !== pieceId || this._selectedPieceId === null) return;
-
         const pieceEl = this._jigsawPieces.get(pieceId);
         if (!pieceEl) return;
 
