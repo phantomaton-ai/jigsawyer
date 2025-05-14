@@ -34,13 +34,15 @@ export class JigsawPiece extends HTMLElement {
                     transition: transform 0.1s ease-out, left 0.1s ease-out, top 0.1s ease-out;
                 }
                 svg { width: 100%; height: 100%; overflow: visible; }
+                /* Corrected: Added patternUnits attribute here */
                 #img-pattern { patternUnits: userSpaceOnUse; }
                 .piece-shape { stroke: black; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: grab; }
                 :host([selected]) .piece-shape { stroke: gold; stroke-width: 2; cursor: grabbing; }
             </style>
             <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
                 <defs>
-                    <pattern id="img-pattern"><image id="img-in-pattern"></image></pattern>
+                    <!-- Corrected: Added patternUnits="userSpaceOnUse" -->
+                    <pattern id="img-pattern" patternUnits="userSpaceOnUse"><image id="img-in-pattern"></image></pattern>
                     <clipPath id="piece-clip"><path id="piece-clip-path"></path></clipPath>
                 </defs>
                 <path class="piece-shape" fill="url(#img-pattern)" clip-path="url(#piece-clip)"></path>
@@ -96,10 +98,10 @@ export class JigsawPiece extends HTMLElement {
     _updateSelectedState() {
          const shape = this.shadowRoot.querySelector('.piece-shape');
          if (shape) {
-             if (this.hasAttribute('selected')) shape.classList.add('selected');
-             else shape.classList.remove('selected');
+             // Use toggle based on attribute presence
+             shape.classList.toggle('selected', this.hasAttribute('selected'));
          }
-         // Z-index handled by jigsaw-puzzle re-appending the element
+         // Basic z-index for selected piece (more robust z-ordering might be needed)
          if (this.hasAttribute('selected')) this.style.zIndex = '1'; else this.style.zIndex = '';
     }
 
@@ -119,6 +121,7 @@ export class JigsawPiece extends HTMLElement {
         this.dispatchEvent(createSelectEvent(pieceId, clientX, clientY));
 
         this._isDragging = true;
+        // Use bound methods to correctly remove listeners later
         this._onPointerMoveBound = this._onPointerMove.bind(this);
         this._onPointerUpBound = this._onPointerUp.bind(this);
         window.addEventListener('mousemove', this._onPointerMoveBound);
